@@ -1,0 +1,1725 @@
+<!doctype html>
+<html lang="es">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>REPLAY.GG — Fortnite Replay Analyzer</title>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link
+            href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=JetBrains+Mono:wght@300;400;500;600&display=swap"
+            rel="stylesheet"
+        />
+        <style>
+            :root {
+                --bg: #080b10;
+                --surface: #0d1117;
+                --surface2: #111820;
+                --surface3: #161f2a;
+                --border: #1e2d3d;
+                --border2: #243545;
+                --cyan: #00d4ff;
+                --cyan-dim: #00a8cc;
+                --cyan-glow: rgba(0, 212, 255, 0.12);
+                --cyan-glow2: rgba(0, 212, 255, 0.06);
+                --gold: #f0c040;
+                --gold-dim: #c9a030;
+                --red: #ff4040;
+                --green: #40ff90;
+                --text: #c8d8e8;
+                --text-dim: #5a7a90;
+                --text-muted: #3a5060;
+                --font-ui: "Rajdhani", sans-serif;
+                --font-mono: "JetBrains Mono", monospace;
+            }
+
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
+
+            body {
+                background: var(--bg);
+                color: var(--text);
+                font-family: var(--font-ui);
+                font-weight: 500;
+                min-height: 100vh;
+                overflow-x: hidden;
+            }
+
+            /* Grid texture background */
+            body::before {
+                content: "";
+                position: fixed;
+                inset: 0;
+                background-image:
+                    linear-gradient(
+                        rgba(0, 212, 255, 0.02) 1px,
+                        transparent 1px
+                    ),
+                    linear-gradient(
+                        90deg,
+                        rgba(0, 212, 255, 0.02) 1px,
+                        transparent 1px
+                    );
+                background-size: 40px 40px;
+                pointer-events: none;
+                z-index: 0;
+            }
+
+            /* ── HEADER ── */
+            header {
+                position: relative;
+                z-index: 10;
+                border-bottom: 1px solid var(--border);
+                background: rgba(8, 11, 16, 0.95);
+                backdrop-filter: blur(10px);
+                padding: 0 32px;
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                height: 56px;
+            }
+
+            .logo {
+                font-family: var(--font-ui);
+                font-weight: 700;
+                font-size: 22px;
+                letter-spacing: 0.1em;
+                color: #fff;
+                display: flex;
+                align-items: center;
+                gap: 8px;
+            }
+
+            .logo-accent {
+                color: var(--cyan);
+                text-shadow: 0 0 20px var(--cyan);
+            }
+
+            .logo-badge {
+                font-family: var(--font-mono);
+                font-size: 9px;
+                font-weight: 400;
+                color: var(--text-dim);
+                letter-spacing: 0.2em;
+                border: 1px solid var(--border2);
+                padding: 2px 6px;
+                margin-left: 4px;
+                text-transform: uppercase;
+            }
+
+            .header-nav {
+                display: flex;
+                align-items: center;
+                gap: 24px;
+                font-size: 13px;
+                letter-spacing: 0.08em;
+                text-transform: uppercase;
+                color: var(--text-dim);
+            }
+
+            /* ── MAIN LAYOUT ── */
+            main {
+                position: relative;
+                z-index: 1;
+                max-width: 1400px;
+                margin: 0 auto;
+                padding: 32px;
+            }
+
+            /* ── UPLOAD ZONE ── */
+            #upload-section {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                min-height: calc(100vh - 56px);
+                gap: 32px;
+            }
+
+            .upload-eyebrow {
+                font-family: var(--font-mono);
+                font-size: 11px;
+                font-weight: 400;
+                letter-spacing: 0.25em;
+                text-transform: uppercase;
+                color: var(--cyan-dim);
+                display: flex;
+                align-items: center;
+                gap: 12px;
+            }
+
+            .upload-eyebrow::before,
+            .upload-eyebrow::after {
+                content: "";
+                width: 40px;
+                height: 1px;
+                background: var(--cyan-dim);
+                opacity: 0.4;
+            }
+
+            .upload-title {
+                font-size: 52px;
+                font-weight: 700;
+                letter-spacing: -0.01em;
+                line-height: 1.05;
+                text-align: center;
+                color: #fff;
+            }
+
+            .upload-title span {
+                color: var(--cyan);
+            }
+
+            .upload-sub {
+                font-family: var(--font-mono);
+                font-size: 13px;
+                font-weight: 300;
+                color: var(--text-dim);
+                text-align: center;
+                max-width: 480px;
+                line-height: 1.7;
+            }
+
+            #drop-zone {
+                width: 600px;
+                max-width: 100%;
+                border: 1px solid var(--border2);
+                background: var(--surface);
+                padding: 64px 48px;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                gap: 20px;
+                cursor: pointer;
+                position: relative;
+                transition: all 0.2s ease;
+                clip-path: polygon(
+                    16px 0%,
+                    100% 0%,
+                    100% calc(100% - 16px),
+                    calc(100% - 16px) 100%,
+                    0% 100%,
+                    0% 16px
+                );
+            }
+
+            #drop-zone::before {
+                content: "";
+                position: absolute;
+                inset: 0;
+                background: var(--cyan-glow2);
+                opacity: 0;
+                transition: opacity 0.2s ease;
+            }
+
+            #drop-zone:hover::before,
+            #drop-zone.drag-over::before {
+                opacity: 1;
+            }
+
+            #drop-zone:hover,
+            #drop-zone.drag-over {
+                border-color: var(--cyan);
+                box-shadow:
+                    0 0 40px var(--cyan-glow),
+                    inset 0 0 40px var(--cyan-glow2);
+            }
+
+            .drop-icon {
+                width: 64px;
+                height: 64px;
+                border: 1px solid var(--border2);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                clip-path: polygon(
+                    8px 0%,
+                    100% 0%,
+                    100% calc(100% - 8px),
+                    calc(100% - 8px) 100%,
+                    0% 100%,
+                    0% 8px
+                );
+                background: var(--surface2);
+                color: var(--cyan);
+                font-size: 24px;
+            }
+
+            .drop-text {
+                font-size: 20px;
+                font-weight: 700;
+                letter-spacing: 0.05em;
+                color: #fff;
+            }
+
+            .drop-hint {
+                font-family: var(--font-mono);
+                font-size: 11px;
+                color: var(--text-dim);
+                letter-spacing: 0.1em;
+            }
+
+            .drop-ext {
+                font-family: var(--font-mono);
+                font-size: 10px;
+                color: var(--cyan);
+                background: var(--cyan-glow);
+                border: 1px solid rgba(0, 212, 255, 0.2);
+                padding: 3px 10px;
+                letter-spacing: 0.15em;
+            }
+
+            #file-input {
+                display: none;
+            }
+
+            /* ── LOADING ── */
+            #loading-section {
+                display: none;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                min-height: calc(100vh - 56px);
+                gap: 24px;
+            }
+
+            .spinner {
+                width: 56px;
+                height: 56px;
+                border: 2px solid var(--border2);
+                border-top-color: var(--cyan);
+                border-radius: 50%;
+                animation: spin 0.8s linear infinite;
+            }
+
+            @keyframes spin {
+                to {
+                    transform: rotate(360deg);
+                }
+            }
+
+            .loading-label {
+                font-family: var(--font-mono);
+                font-size: 12px;
+                letter-spacing: 0.2em;
+                color: var(--text-dim);
+                text-transform: uppercase;
+                animation: pulse 1.5s ease-in-out infinite;
+            }
+
+            @keyframes pulse {
+                50% {
+                    opacity: 0.4;
+                }
+            }
+
+            .players-list {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 10px;
+                min-height: 58px;
+            }
+
+            .player-chip {
+                font-family: var(--font-mono);
+                font-size: 11px;
+                letter-spacing: 0.08em;
+                color: var(--text);
+                background: linear-gradient(
+                    180deg,
+                    rgba(0, 212, 255, 0.1),
+                    rgba(0, 212, 255, 0.04)
+                );
+                border: 1px solid rgba(0, 212, 255, 0.18);
+                padding: 8px 10px;
+                clip-path: polygon(
+                    6px 0%,
+                    100% 0%,
+                    100% calc(100% - 6px),
+                    calc(100% - 6px) 100%,
+                    0% 100%,
+                    0% 6px
+                );
+            }
+
+            .players-empty,
+            .map-empty {
+                font-family: var(--font-mono);
+                font-size: 11px;
+                color: var(--text-dim);
+                letter-spacing: 0.08em;
+                line-height: 1.7;
+            }
+
+            .map-frame {
+                position: relative;
+                width: 100%;
+                border: 1px solid var(--border2);
+                background: var(--surface2);
+                margin-bottom: 14px;
+                overflow: hidden;
+            }
+
+            .map-frame img {
+                width: 100%;
+                max-height: 220px;
+                object-fit: cover;
+                display: none;
+            }
+
+            .map-meta {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 12px;
+                margin-bottom: 12px;
+                font-family: var(--font-mono);
+                font-size: 11px;
+                color: var(--text-dim);
+                letter-spacing: 0.08em;
+                text-transform: uppercase;
+            }
+
+            @media (max-width: 960px) {
+                .players-list {
+                    gap: 8px;
+                }
+                .player-chip {
+                    width: 100%;
+                }
+            }
+
+            /* ── RESULTS ── */
+            #results-section {
+                display: none;
+            }
+
+            .results-header {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                margin-bottom: 28px;
+                padding-bottom: 20px;
+                border-bottom: 1px solid var(--border);
+            }
+
+            .results-title {
+                font-size: 28px;
+                font-weight: 700;
+                letter-spacing: 0.05em;
+                color: #fff;
+            }
+
+            .results-meta {
+                font-family: var(--font-mono);
+                font-size: 11px;
+                color: var(--text-dim);
+                letter-spacing: 0.1em;
+            }
+
+            .btn-back {
+                font-family: var(--font-mono);
+                font-size: 11px;
+                letter-spacing: 0.15em;
+                text-transform: uppercase;
+                color: var(--text-dim);
+                background: none;
+                border: 1px solid var(--border2);
+                padding: 8px 16px;
+                cursor: pointer;
+                transition: all 0.15s ease;
+                clip-path: polygon(
+                    6px 0%,
+                    100% 0%,
+                    100% calc(100% - 6px),
+                    calc(100% - 6px) 100%,
+                    0% 100%,
+                    0% 6px
+                );
+            }
+
+            .btn-back:hover {
+                border-color: var(--cyan);
+                color: var(--cyan);
+                background: var(--cyan-glow2);
+            }
+
+            /* ── STAT CARDS GRID ── */
+            .stat-grid {
+                display: grid;
+                grid-template-columns: repeat(6, 1fr);
+                gap: 12px;
+                margin-bottom: 24px;
+            }
+
+            .stat-card {
+                background: var(--surface);
+                border: 1px solid var(--border);
+                padding: 20px 18px;
+                clip-path: polygon(
+                    8px 0%,
+                    100% 0%,
+                    100% calc(100% - 8px),
+                    calc(100% - 8px) 100%,
+                    0% 100%,
+                    0% 8px
+                );
+                position: relative;
+                overflow: hidden;
+                animation: fadeSlideUp 0.4s ease both;
+            }
+
+            @keyframes fadeSlideUp {
+                from {
+                    opacity: 0;
+                    transform: translateY(12px);
+                }
+                to {
+                    opacity: 1;
+                    transform: translateY(0);
+                }
+            }
+
+            .stat-card:nth-child(1) {
+                animation-delay: 0.05s;
+            }
+            .stat-card:nth-child(2) {
+                animation-delay: 0.1s;
+            }
+            .stat-card:nth-child(3) {
+                animation-delay: 0.15s;
+            }
+            .stat-card:nth-child(4) {
+                animation-delay: 0.2s;
+            }
+            .stat-card:nth-child(5) {
+                animation-delay: 0.25s;
+            }
+            .stat-card:nth-child(6) {
+                animation-delay: 0.3s;
+            }
+
+            .stat-card--highlight {
+                border-color: var(--cyan);
+                background: linear-gradient(
+                    135deg,
+                    var(--surface) 70%,
+                    rgba(0, 212, 255, 0.05)
+                );
+            }
+
+            .stat-card--highlight::after {
+                content: "";
+                position: absolute;
+                top: 0;
+                left: 0;
+                right: 0;
+                height: 2px;
+                background: var(--cyan);
+                box-shadow: 0 0 12px var(--cyan);
+            }
+
+            .stat-card--gold {
+                border-color: var(--gold-dim);
+                background: linear-gradient(
+                    135deg,
+                    var(--surface) 70%,
+                    rgba(240, 192, 64, 0.05)
+                );
+            }
+
+            .stat-card--gold::after {
+                content: "";
+                position: absolute;
+                top: 0;
+                left: 0;
+                right: 0;
+                height: 2px;
+                background: var(--gold);
+                box-shadow: 0 0 12px var(--gold);
+            }
+
+            .stat-label {
+                font-family: var(--font-mono);
+                font-size: 9px;
+                letter-spacing: 0.2em;
+                text-transform: uppercase;
+                color: var(--text-muted);
+                margin-bottom: 10px;
+            }
+
+            .stat-value {
+                font-family: var(--font-mono);
+                font-size: 30px;
+                font-weight: 600;
+                color: #fff;
+                line-height: 1;
+            }
+
+            .stat-card--highlight .stat-value {
+                color: var(--cyan);
+            }
+            .stat-card--gold .stat-value {
+                color: var(--gold);
+            }
+
+            .stat-unit {
+                font-size: 12px;
+                font-weight: 400;
+                color: var(--text-dim);
+                margin-left: 4px;
+            }
+
+            /* ── MAIN CONTENT GRID ── */
+            .content-grid {
+                display: grid;
+                grid-template-columns: 1fr 380px;
+                gap: 20px;
+            }
+
+            /* ── PANEL ── */
+            .panel {
+                background: var(--surface);
+                border: 1px solid var(--border);
+                clip-path: polygon(
+                    12px 0%,
+                    100% 0%,
+                    100% calc(100% - 12px),
+                    calc(100% - 12px) 100%,
+                    0% 100%,
+                    0% 12px
+                );
+                animation: fadeSlideUp 0.4s ease 0.35s both;
+            }
+
+            .panel-header {
+                padding: 16px 20px;
+                border-bottom: 1px solid var(--border);
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+            }
+
+            .panel-title {
+                font-size: 13px;
+                font-weight: 700;
+                letter-spacing: 0.12em;
+                text-transform: uppercase;
+                color: #fff;
+                display: flex;
+                align-items: center;
+                gap: 10px;
+            }
+
+            .panel-title-dot {
+                width: 6px;
+                height: 6px;
+                background: var(--cyan);
+                box-shadow: 0 0 8px var(--cyan);
+                clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);
+            }
+
+            .panel-count {
+                font-family: var(--font-mono);
+                font-size: 10px;
+                color: var(--text-dim);
+                letter-spacing: 0.1em;
+            }
+
+            /* ── 2D MAP ── */
+            #map-canvas {
+                display: block;
+                width: 100%;
+                background: #050a0f;
+            }
+
+            .map-controls {
+                padding: 12px 20px;
+                border-top: 1px solid var(--border);
+                display: flex;
+                align-items: center;
+                gap: 16px;
+            }
+
+            .btn-play {
+                font-family: var(--font-mono);
+                font-size: 10px;
+                letter-spacing: 0.15em;
+                text-transform: uppercase;
+                color: var(--bg);
+                background: var(--cyan);
+                border: none;
+                padding: 8px 20px;
+                cursor: pointer;
+                font-weight: 600;
+                transition: all 0.15s ease;
+                clip-path: polygon(
+                    6px 0%,
+                    100% 0%,
+                    100% calc(100% - 6px),
+                    calc(100% - 6px) 100%,
+                    0% 100%,
+                    0% 6px
+                );
+            }
+
+            .btn-play:hover {
+                background: #20e8ff;
+            }
+            .btn-play:disabled {
+                opacity: 0.4;
+                cursor: not-allowed;
+            }
+
+            #timeline-slider {
+                flex: 1;
+                -webkit-appearance: none;
+                height: 2px;
+                background: var(--border2);
+                outline: none;
+                cursor: pointer;
+            }
+
+            #timeline-slider::-webkit-slider-thumb {
+                -webkit-appearance: none;
+                width: 14px;
+                height: 14px;
+                background: var(--cyan);
+                cursor: pointer;
+                clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);
+            }
+
+            #timeline-label {
+                font-family: var(--font-mono);
+                font-size: 11px;
+                color: var(--text-dim);
+                min-width: 44px;
+                text-align: right;
+                letter-spacing: 0.05em;
+            }
+
+            .map-legend {
+                padding: 10px 20px;
+                border-top: 1px solid var(--border);
+                display: flex;
+                align-items: center;
+                gap: 20px;
+            }
+
+            .legend-item {
+                display: flex;
+                align-items: center;
+                gap: 7px;
+                font-family: var(--font-mono);
+                font-size: 10px;
+                color: var(--text-dim);
+                letter-spacing: 0.08em;
+            }
+
+            .legend-dot {
+                width: 8px;
+                height: 8px;
+                border-radius: 50%;
+            }
+
+            /* ── ELIM FEED ── */
+            .elim-list {
+                max-height: 520px;
+                overflow-y: auto;
+                scrollbar-width: thin;
+                scrollbar-color: var(--border2) transparent;
+            }
+
+            .elim-list::-webkit-scrollbar {
+                width: 3px;
+            }
+            .elim-list::-webkit-scrollbar-thumb {
+                background: var(--border2);
+            }
+
+            .elim-item {
+                padding: 12px 20px;
+                border-bottom: 1px solid var(--border);
+                display: grid;
+                grid-template-columns: 44px 1fr;
+                gap: 12px;
+                align-items: start;
+                transition: background 0.15s ease;
+                cursor: default;
+            }
+
+            .elim-item:hover {
+                background: var(--surface2);
+            }
+
+            .elim-item.knocked {
+                opacity: 0.6;
+            }
+
+            .elim-item.active-elim {
+                background: rgba(0, 212, 255, 0.06);
+                border-left: 2px solid var(--cyan);
+            }
+
+            .elim-time {
+                font-family: var(--font-mono);
+                font-size: 10px;
+                color: var(--text-dim);
+                letter-spacing: 0.05em;
+                padding-top: 2px;
+            }
+
+            .elim-body {
+            }
+
+            .elim-names {
+                font-size: 14px;
+                font-weight: 600;
+                line-height: 1.4;
+                color: var(--text);
+            }
+
+            .elim-killer {
+                color: var(--green);
+            }
+            .elim-victim {
+                color: var(--red);
+            }
+            .elim-arrow {
+                color: var(--text-dim);
+                margin: 0 5px;
+                font-size: 12px;
+            }
+
+            .elim-weapon {
+                font-family: var(--font-mono);
+                font-size: 9px;
+                letter-spacing: 0.12em;
+                text-transform: uppercase;
+                color: var(--text-muted);
+                margin-top: 4px;
+            }
+
+            .knocked-badge {
+                display: inline-block;
+                font-family: var(--font-mono);
+                font-size: 8px;
+                letter-spacing: 0.15em;
+                color: var(--gold-dim);
+                border: 1px solid rgba(240, 192, 64, 0.3);
+                padding: 1px 5px;
+                margin-left: 6px;
+                vertical-align: middle;
+            }
+
+            /* ── STATS SECTION ── */
+            .stat-detail-grid {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 1px;
+                background: var(--border);
+            }
+
+            .stat-row {
+                padding: 14px 20px;
+                background: var(--surface);
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                transition: background 0.12s ease;
+            }
+
+            .stat-row:hover {
+                background: var(--surface2);
+            }
+
+            .stat-row-label {
+                font-family: var(--font-mono);
+                font-size: 10px;
+                letter-spacing: 0.12em;
+                text-transform: uppercase;
+                color: var(--text-dim);
+            }
+
+            .stat-row-value {
+                font-family: var(--font-mono);
+                font-size: 16px;
+                font-weight: 600;
+                color: #fff;
+            }
+
+            /* ── ERROR ── */
+            #error-section {
+                display: none;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                min-height: calc(100vh - 56px);
+                gap: 16px;
+                text-align: center;
+            }
+
+            .error-code {
+                font-family: var(--font-mono);
+                font-size: 11px;
+                letter-spacing: 0.2em;
+                color: var(--red);
+                text-transform: uppercase;
+            }
+
+            .error-msg {
+                font-size: 18px;
+                font-weight: 600;
+                color: #fff;
+            }
+
+            .error-detail {
+                font-family: var(--font-mono);
+                font-size: 11px;
+                color: var(--text-dim);
+                max-width: 480px;
+                line-height: 1.7;
+            }
+
+            /* ── NO EVENTS NOTICE ── */
+            .empty-state {
+                padding: 48px 20px;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                gap: 12px;
+            }
+
+            .empty-icon {
+                font-size: 32px;
+                opacity: 0.3;
+            }
+
+            .empty-text {
+                font-family: var(--font-mono);
+                font-size: 11px;
+                letter-spacing: 0.1em;
+                color: var(--text-dim);
+                text-transform: uppercase;
+            }
+        </style>
+    </head>
+    <body>
+        <header>
+            <div class="logo">
+                REPLAY<span class="logo-accent">.GG</span>
+                <span class="logo-badge">Beta</span>
+            </div>
+            <nav class="header-nav">
+                <span>Fortnite Replay Analyzer</span>
+            </nav>
+        </header>
+
+        <!-- UPLOAD -->
+        <main>
+            <section id="upload-section">
+                <div class="upload-eyebrow">Analizador de Replays</div>
+                <h1 class="upload-title">
+                    Lee tu partida.<br /><span>Entiende cada momento.</span>
+                </h1>
+                <p class="upload-sub">
+                    Sube tu archivo <code>.replay</code> de Fortnite y obtén
+                    estadísticas detalladas + visualización 2D de la partida.
+                </p>
+
+                <div id="drop-zone">
+                    <div class="drop-icon">&#x25B6;</div>
+                    <div class="drop-text">Arrastra tu archivo .replay</div>
+                    <div class="drop-hint">o haz clic para seleccionar</div>
+                    <div class="drop-ext">.REPLAY</div>
+                    <input type="file" id="file-input" accept=".replay" />
+                </div>
+
+                <p class="upload-sub" style="font-size: 11px; max-width: 560px">
+                    Tus replays están en:
+                    <code style="color: var(--cyan)"
+                        >%LocalAppData%\FortniteGame\Saved\Demos</code
+                    >
+                </p>
+            </section>
+
+            <!-- LOADING -->
+            <section id="loading-section">
+                <div class="spinner"></div>
+                <div class="loading-label">Parseando replay...</div>
+            </section>
+
+            <!-- ERROR -->
+            <section id="error-section">
+                <div class="error-code">Error al parsear</div>
+                <div class="error-msg">No se pudo leer el archivo</div>
+                <div class="error-detail" id="error-detail"></div>
+                <button class="btn-back" onclick="resetToUpload()">
+                    Volver a intentar
+                </button>
+            </section>
+
+            <!-- RESULTS -->
+            <section id="results-section">
+                <div class="results-header">
+                    <div>
+                        <div class="results-title" id="results-filename">
+                            Replay Analysis
+                        </div>
+                        <div class="results-meta" id="results-meta"></div>
+                    </div>
+                    <button class="btn-back" onclick="resetToUpload()">
+                        &#8592; Nuevo replay
+                    </button>
+                </div>
+
+                <!-- Stat Cards -->
+                <div class="stat-grid" id="stat-grid">
+                    <div class="stat-card stat-card--gold">
+                        <div class="stat-label">Placement</div>
+                        <div class="stat-value" id="s-placement">—</div>
+                    </div>
+                    <div class="stat-card stat-card--highlight">
+                        <div class="stat-label">Eliminaciones</div>
+                        <div class="stat-value" id="s-elims">0</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Duración</div>
+                        <div class="stat-value" id="s-duration">—</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Asistencias</div>
+                        <div class="stat-value" id="s-assists">0</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Daño causado</div>
+                        <div class="stat-value" id="s-damage">0</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Daño recibido</div>
+                        <div class="stat-value" id="s-dtaken">0</div>
+                    </div>
+                </div>
+
+                <!-- Main content -->
+                <div class="content-grid">
+                    <!-- MAP -->
+                    <div class="panel">
+                        <div class="panel-header">
+                            <div class="panel-title">
+                                <div class="panel-title-dot"></div>
+                                Vista 2D — Mini Replay
+                            </div>
+                            <div class="panel-count" id="map-event-count"></div>
+                        </div>
+                        <div class="map-frame">
+                            <img
+                                id="map-image"
+                                alt="Mapa actual de Fortnite"
+                                loading="lazy"
+                            />
+                            <div class="map-empty" id="map-empty">
+                                No hay mapa externo cargado. Configura tu API
+                                key en el backend para mostrar la imagen
+                                oficial.
+                            </div>
+                        </div>
+                        <div class="map-meta">
+                            <div id="map-name">SIN MAPA EXTERNO</div>
+                            <div id="map-provider">FORTNITEAPI</div>
+                        </div>
+                        <canvas
+                            id="map-canvas"
+                            width="800"
+                            height="520"
+                        ></canvas>
+                        <div class="map-controls">
+                            <button
+                                class="btn-play"
+                                id="btn-play"
+                                onclick="togglePlay()"
+                            >
+                                &#9654; PLAY
+                            </button>
+                            <input
+                                type="range"
+                                id="timeline-slider"
+                                min="0"
+                                max="100"
+                                value="0"
+                                oninput="scrubTo(this.value)"
+                            />
+                            <div id="timeline-label">00:00</div>
+                        </div>
+                        <div class="map-legend">
+                            <div class="legend-item">
+                                <div
+                                    class="legend-dot"
+                                    style="background: #40ff90"
+                                ></div>
+                                Eliminator
+                            </div>
+                            <div class="legend-item">
+                                <div
+                                    class="legend-dot"
+                                    style="background: #ff4040"
+                                ></div>
+                                Eliminated
+                            </div>
+                            <div class="legend-item">
+                                <div
+                                    class="legend-dot"
+                                    style="background: #f0c040"
+                                ></div>
+                                Knock
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- RIGHT COLUMN: Players + Elim Feed + Stats -->
+                    <div
+                        style="display: flex; flex-direction: column; gap: 16px"
+                    >
+                        <div class="panel">
+                            <div class="panel-header">
+                                <div class="panel-title">
+                                    <div
+                                        class="panel-title-dot"
+                                        style="
+                                            background: var(--cyan);
+                                            box-shadow: 0 0 8px var(--cyan);
+                                        "
+                                    ></div>
+                                    Jugadores detectados
+                                </div>
+                                <div
+                                    class="panel-count"
+                                    id="players-count-label"
+                                >
+                                    0 jugadores
+                                </div>
+                            </div>
+                            <div class="players-list" id="players-list"></div>
+                        </div>
+
+                        <div class="panel" style="flex: 1">
+                            <div class="panel-header">
+                                <div class="panel-title">
+                                    <div
+                                        class="panel-title-dot"
+                                        style="
+                                            background: var(--red);
+                                            box-shadow: 0 0 8px var(--red);
+                                        "
+                                    ></div>
+                                    Feed de Eliminaciones
+                                </div>
+                                <div class="panel-count" id="elim-count-label">
+                                    0 eventos
+                                </div>
+                            </div>
+                            <div class="elim-list" id="elim-list"></div>
+                        </div>
+
+                        <div class="panel">
+                            <div class="panel-header">
+                                <div class="panel-title">
+                                    <div
+                                        class="panel-title-dot"
+                                        style="
+                                            background: var(--gold);
+                                            box-shadow: 0 0 8px var(--gold);
+                                        "
+                                    ></div>
+                                    Estadísticas Detalladas
+                                </div>
+                            </div>
+                            <div
+                                class="stat-detail-grid"
+                                id="stats-detail"
+                            ></div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <script>
+            // ── CONFIG ──
+            const API_URL = "http://localhost:7433";
+
+            // ── UI ELEMENTS ──
+            const sections = {
+                upload: document.getElementById("upload-section"),
+                loading: document.getElementById("loading-section"),
+                results: document.getElementById("results-section"),
+                error: document.getElementById("error-section"),
+            };
+
+            function show(sec) {
+                Object.values(sections).forEach(
+                    (s) => (s.style.display = "none"),
+                );
+                sections[sec].style.display =
+                    sec === "upload" || sec === "loading" ? "flex" : "block";
+            }
+
+            const dropZone = document.getElementById("drop-zone");
+            const fileInput = document.getElementById("file-input");
+
+            dropZone.addEventListener("click", () => fileInput.click());
+            fileInput.addEventListener("change", (e) =>
+                handleFile(e.target.files[0]),
+            );
+
+            dropZone.addEventListener("dragover", (e) => {
+                e.preventDefault();
+                dropZone.classList.add("drag-over");
+            });
+            dropZone.addEventListener("dragleave", () =>
+                dropZone.classList.remove("drag-over"),
+            );
+            dropZone.addEventListener("drop", (e) => {
+                e.preventDefault();
+                dropZone.classList.remove("drag-over");
+                const file = e.dataTransfer.files[0];
+                if (file) handleFile(file);
+            });
+
+            function resetToUpload() {
+                show("upload");
+                fileInput.value = "";
+                clearPlayback();
+            }
+
+            async function handleFile(file) {
+                if (!file || !file.name.endsWith(".replay")) {
+                    showError(
+                        "Formato incorrecto",
+                        "El archivo debe tener extensión .replay",
+                    );
+                    return;
+                }
+
+                show("loading");
+
+                const fd = new FormData();
+                fd.append("file", file);
+
+                try {
+                    const res = await fetch(`${API_URL}/parse`, {
+                        method: "POST",
+                        body: fd,
+                    });
+                    const data = await res.json();
+
+                    if (!res.ok)
+                        throw new Error(data.error || "Error del servidor");
+                    if (data.error) throw new Error(data.error);
+
+                    renderResults(file.name, data);
+                    show("results");
+                } catch (err) {
+                    showError("Error al parsear el replay", err.message);
+                }
+            }
+
+            function showError(msg, detail) {
+                document.getElementById("error-detail").textContent =
+                    detail || "";
+                document.querySelector(
+                    "#error-section .error-msg",
+                ).textContent = msg;
+                show("error");
+            }
+
+            let replayData = null;
+            let playback = {
+                currentIndex: 0,
+                points: [],
+                durationMs: 0,
+                isPlaying: false,
+                timer: null,
+            };
+
+            function renderResults(filename, data) {
+                replayData = data;
+
+                const owner =
+                    data.summary?.owner || filename.replace(".replay", "");
+                document.getElementById("results-filename").textContent = owner;
+                const ts = data.summary?.timestamp
+                    ? new Date(data.summary.timestamp).toLocaleString("es-MX")
+                    : "";
+                document.getElementById("results-meta").textContent = ts;
+
+                const s = data.summary || {};
+                const ms = data.match_stats || {};
+
+                const placement = s.placement;
+                const placementEl = document.getElementById("s-placement");
+                if (placement && placement <= 1) {
+                    placementEl.textContent = "1st";
+                    placementEl.style.color = "var(--gold)";
+                } else if (placement) {
+                    placementEl.textContent = "#" + placement;
+                    placementEl.style.color = "";
+                } else {
+                    placementEl.textContent = "—";
+                }
+
+                document.getElementById("s-elims").textContent =
+                    ms.eliminations ?? s.total_eliminations ?? 0;
+                document.getElementById("s-duration").textContent =
+                    s.duration || "—";
+                document.getElementById("s-assists").textContent =
+                    ms.assists ?? "—";
+                document.getElementById("s-damage").textContent =
+                    ms.damage_to_players ?? ms.weapon_damage ?? 0;
+                document.getElementById("s-dtaken").textContent =
+                    ms.damage_taken ?? "—";
+
+                renderDetailStats(ms, s);
+                renderPlayers(data.players || []);
+                renderElimFeed(data.eliminations || []);
+                renderMapPanel(data.map || null);
+                renderMap(
+                    data.eliminations || [],
+                    s.duration_ms || 0,
+                    data.replay_positions || [],
+                    data.map?.selected?.url || null,
+                );
+            }
+
+            function renderDetailStats(ms, s) {
+                const damageRatio =
+                    ms.damage_to_players &&
+                    ms.damage_taken &&
+                    ms.damage_taken > 0
+                        ? (ms.damage_to_players / ms.damage_taken).toFixed(2)
+                        : "—";
+
+                const rows = [
+                    ["Jugador", s.owner || "—"],
+                    [
+                        "Precisión",
+                        ms.accuracy != null ? ms.accuracy + "%" : "—",
+                    ],
+                    [
+                        "Daño causado / recibido",
+                        `${ms.damage_to_players ?? "—"} / ${ms.damage_taken ?? "—"}`,
+                    ],
+                    ["Ratio daño", damageRatio],
+                    ["Daño a estructuras", ms.damage_to_structures ?? "—"],
+                    ["Materiales reunidos", ms.materials_gathered ?? "—"],
+                    ["Materiales usados", ms.materials_used ?? "—"],
+                    [
+                        "Distancia recorrida",
+                        ms.total_traveled != null
+                            ? Math.round(ms.total_traveled)
+                            : "—",
+                    ],
+                    ["Daño misc.", ms.other_damage ?? "—"],
+                    ["Revives", ms.revives ?? "—"],
+                    ["Total jugadores", s.total_players ?? "—"],
+                ];
+
+                const grid = document.getElementById("stats-detail");
+                grid.innerHTML = rows
+                    .map(
+                        ([label, value]) => `
+    <div class="stat-row">
+      <div class="stat-row-label">${label}</div>
+      <div class="stat-row-value">${value}</div>
+    </div>
+  `,
+                    )
+                    .join("");
+            }
+
+            function renderPlayers(players) {
+                const list = document.getElementById("players-list");
+                const count = document.getElementById("players-count-label");
+                count.textContent = `${players.length} jugador${players.length === 1 ? "" : "es"}`;
+
+                if (!players.length) {
+                    list.innerHTML = `<div class="players-empty">No se detectaron nombres adicionales en el replay. Con este parser normalmente se recuperan los involucrados en eventos, sobre todo eliminaciones.</div>`;
+                    return;
+                }
+
+                list.innerHTML = players
+                    .map(
+                        (name) =>
+                            `<div class="player-chip">${escapeHtml(name)}</div>`,
+                    )
+                    .join("");
+            }
+
+            function renderElimFeed(elims) {
+                const list = document.getElementById("elim-list");
+                document.getElementById("elim-count-label").textContent =
+                    elims.length + " eventos";
+
+                if (elims.length === 0) {
+                    list.innerHTML = `<div class="empty-state">
+      <div class="empty-icon">&#9651;</div>
+      <div class="empty-text">Sin eliminaciones registradas</div>
+    </div>`;
+                    return;
+                }
+
+                list.innerHTML = elims
+                    .map(
+                        (e, i) => `
+    <div class="elim-item ${e.knocked ? "knocked" : ""}" id="elim-${i}" onclick="jumpToElim(${i})">
+      <div class="elim-time">${e.start_time_str || "00:00"}</div>
+      <div class="elim-body">
+        <div class="elim-names">
+          <span class="elim-killer">${escapeHtml(e.eliminator || "?")}</span>
+          <span class="elim-arrow">&#x25B6;</span>
+          <span class="elim-victim">${escapeHtml(e.eliminated || "?")}</span>
+          ${e.knocked ? '<span class="knock-badge">KNOCK</span>' : ""}
+        </div>
+        <div class="elim-weapon">${escapeHtml(e.gun_type || "Unknown")}</div>
+      </div>
+    </div>
+  `,
+                    )
+                    .join("");
+            }
+
+            function renderMapPanel(map) {
+                const img = document.getElementById("map-image");
+                const empty = document.getElementById("map-empty");
+                const name = document.getElementById("map-name");
+                const provider = document.getElementById("map-provider");
+
+                const selected = map?.selected || null;
+                const imageUrl =
+                    selected?.url ||
+                    selected?.raw?.images?.blank ||
+                    selected?.raw?.images?.pois ||
+                    null;
+
+                provider.textContent = (
+                    map?.provider || "FORTNITEAPI"
+                ).toUpperCase();
+                name.textContent =
+                    selected?.name ||
+                    (map?.error ? "MAPA NO DISPONIBLE" : "SIN MAPA EXTERNO");
+
+                if (imageUrl) {
+                    img.src = imageUrl;
+                    img.style.display = "block";
+                    empty.style.display = "none";
+                } else {
+                    img.removeAttribute("src");
+                    img.style.display = "none";
+                    empty.textContent =
+                        map?.error ||
+                        "No se pudo obtener la imagen del mapa con la API externa.";
+                    empty.style.display = "block";
+                }
+            }
+
+            let mapBgImage = null;
+
+            function renderMap(elims, durationMs, replayPositions, mapUrl) {
+                const canvas = document.getElementById("map-canvas");
+                const ctx = canvas.getContext("2d");
+                const points = normalizeReplayPoints(
+                    elims,
+                    replayPositions,
+                    canvas.width,
+                    canvas.height,
+                );
+
+                playback.points = points;
+                playback.currentIndex = 0;
+                playback.durationMs =
+                    durationMs || inferDuration(points, elims);
+                document.getElementById("map-event-count").textContent =
+                    `${points.length} puntos`;
+                document.getElementById("timeline-slider").value = 0;
+
+                if (mapUrl) {
+                    const img = new Image();
+                    img.crossOrigin = "anonymous";
+                    img.onload = () => {
+                        mapBgImage = img;
+                        drawFrame(0);
+                    };
+                    img.onerror = () => {
+                        mapBgImage = null;
+                        drawFrame(0);
+                    };
+                    img.src = mapUrl;
+                } else {
+                    mapBgImage = null;
+                    drawFrame(0);
+                }
+            }
+
+            function normalizeReplayPoints(
+                elims,
+                replayPositions,
+                width,
+                height,
+            ) {
+                const fromReplay = (replayPositions || []).filter(
+                    (p) => Number.isFinite(p.x) && Number.isFinite(p.y),
+                );
+                const fromElims = (elims || [])
+                    .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y))
+                    .map((p) => ({
+                        t: p.start_time,
+                        x: p.x,
+                        y: p.y,
+                        player: p.eliminator || p.eliminated || null,
+                        source: p.knocked ? "knock" : "elim",
+                    }));
+
+                const source = fromReplay.length ? fromReplay : fromElims;
+
+                if (!source.length) {
+                    return (elims || []).map((e, i) => ({
+                        t: e.start_time ?? i * 5000,
+                        px: 100 + ((i * 73) % (width - 200)),
+                        py: 80 + ((i * 53) % (height - 160)),
+                        player: e.eliminator || e.eliminated || "Unknown",
+                        source: e.knocked ? "knock" : "elim",
+                    }));
+                }
+
+                const xs = source.map((p) => p.x);
+                const ys = source.map((p) => p.y);
+                const minX = Math.min(...xs);
+                const maxX = Math.max(...xs);
+                const minY = Math.min(...ys);
+                const maxY = Math.max(...ys);
+                const spanX = Math.max(1, maxX - minX);
+                const spanY = Math.max(1, maxY - minY);
+                const pad = 30;
+
+                return source
+                    .map((p) => ({
+                        t: p.t ?? 0,
+                        px: pad + ((p.x - minX) / spanX) * (width - pad * 2),
+                        py: pad + ((p.y - minY) / spanY) * (height - pad * 2),
+                        player: p.player || "Unknown",
+                        source: p.source || "event",
+                    }))
+                    .sort((a, b) => (a.t ?? 0) - (b.t ?? 0));
+            }
+
+            function inferDuration(points, elims) {
+                const maxPoint = points.reduce(
+                    (m, p) => Math.max(m, p.t || 0),
+                    0,
+                );
+                const maxElim = (elims || []).reduce(
+                    (m, p) => Math.max(m, p.start_time || 0),
+                    0,
+                );
+                return Math.max(maxPoint, maxElim, 60000);
+            }
+
+            function drawFrame(index) {
+                const canvas = document.getElementById("map-canvas");
+                const ctx = canvas.getContext("2d");
+                const points = playback.points;
+
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                drawCanvasBg(ctx, canvas.width, canvas.height);
+
+                if (!points.length) {
+                    ctx.fillStyle = "#5a7a90";
+                    ctx.font = "14px JetBrains Mono";
+                    ctx.fillText(
+                        "No hay puntos de posición en este replay.",
+                        24,
+                        32,
+                    );
+                    document.getElementById("timeline-label").textContent =
+                        "00:00";
+                    return;
+                }
+
+                const clamped = Math.max(0, Math.min(index, points.length - 1));
+                playback.currentIndex = clamped;
+                const current = points[clamped];
+
+                ctx.strokeStyle = "rgba(0,212,255,0.20)";
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                for (let i = 0; i <= clamped; i++) {
+                    const p = points[i];
+                    if (i === 0) ctx.moveTo(p.px, p.py);
+                    else ctx.lineTo(p.px, p.py);
+                }
+                ctx.stroke();
+
+                points.forEach((p, i) => {
+                    const isActive = i === clamped;
+                    ctx.beginPath();
+                    ctx.fillStyle = pointColor(p.source, isActive);
+                    ctx.arc(p.px, p.py, isActive ? 7 : 4, 0, Math.PI * 2);
+                    ctx.fill();
+                });
+
+                ctx.fillStyle = "#c8d8e8";
+                ctx.font = "12px JetBrains Mono";
+                ctx.fillText(
+                    current.player || "Unknown",
+                    Math.min(current.px + 12, canvas.width - 140),
+                    Math.max(current.py - 10, 20),
+                );
+
+                const pct =
+                    points.length > 1
+                        ? Math.round((clamped / (points.length - 1)) * 100)
+                        : 0;
+                document.getElementById("timeline-slider").value = pct;
+                document.getElementById("timeline-label").textContent =
+                    msToClock(current.t ?? 0);
+                highlightElimByTime(current.t ?? 0);
+            }
+
+            function drawCanvasBg(ctx, width, height) {
+                if (mapBgImage) {
+                    ctx.drawImage(mapBgImage, 0, 0, width, height);
+                    // Overlay oscuro sutil para que los puntos sean legibles
+                    ctx.fillStyle = "rgba(8,11,16,0.45)";
+                    ctx.fillRect(0, 0, width, height);
+                } else {
+                    const grad = ctx.createLinearGradient(0, 0, width, height);
+                    grad.addColorStop(0, "#0d1117");
+                    grad.addColorStop(1, "#111820");
+                    ctx.fillStyle = grad;
+                    ctx.fillRect(0, 0, width, height);
+
+                    ctx.strokeStyle = "rgba(0,212,255,0.06)";
+                    ctx.lineWidth = 1;
+                    for (let x = 0; x <= width; x += 40) {
+                        ctx.beginPath();
+                        ctx.moveTo(x, 0);
+                        ctx.lineTo(x, height);
+                        ctx.stroke();
+                    }
+                    for (let y = 0; y <= height; y += 40) {
+                        ctx.beginPath();
+                        ctx.moveTo(0, y);
+                        ctx.lineTo(width, y);
+                        ctx.stroke();
+                    }
+                }
+            }
+
+            function pointColor(source, active) {
+                if (active) return "#ffffff";
+                if (source === "knock") return "#f0c040";
+                if (source === "elim") return "#ff4040";
+                return "#40ff90";
+            }
+
+            function togglePlay() {
+                const btn = document.getElementById("btn-play");
+                if (!playback.points.length) return;
+
+                playback.isPlaying = !playback.isPlaying;
+                btn.innerHTML = playback.isPlaying
+                    ? "&#10074;&#10074; PAUSE"
+                    : "&#9654; PLAY";
+
+                if (playback.isPlaying) {
+                    playback.timer = setInterval(() => {
+                        if (
+                            playback.currentIndex >=
+                            playback.points.length - 1
+                        ) {
+                            clearPlayback();
+                            drawFrame(playback.points.length - 1);
+                            return;
+                        }
+                        drawFrame(playback.currentIndex + 1);
+                    }, 220);
+                } else {
+                    clearInterval(playback.timer);
+                }
+            }
+
+            function clearPlayback() {
+                playback.isPlaying = false;
+                clearInterval(playback.timer);
+                playback.timer = null;
+                const btn = document.getElementById("btn-play");
+                if (btn) btn.innerHTML = "&#9654; PLAY";
+            }
+
+            function scrubTo(value) {
+                if (!playback.points.length) return;
+                clearPlayback();
+                const idx = Math.round(
+                    (Number(value) / 100) * (playback.points.length - 1),
+                );
+                drawFrame(idx);
+            }
+
+            function jumpToElim(i) {
+                if (!playback.points.length) return;
+                clearPlayback();
+                const target = replayData?.eliminations?.[i]?.start_time ?? 0;
+                let bestIndex = 0;
+                let bestDiff = Infinity;
+                playback.points.forEach((p, idx) => {
+                    const diff = Math.abs((p.t ?? 0) - target);
+                    if (diff < bestDiff) {
+                        bestDiff = diff;
+                        bestIndex = idx;
+                    }
+                });
+                drawFrame(bestIndex);
+            }
+
+            function highlightElimByTime(timeMs) {
+                const elims = replayData?.eliminations || [];
+                let bestIndex = -1;
+                let bestDiff = Infinity;
+
+                elims.forEach((e, i) => {
+                    const diff = Math.abs((e.start_time ?? 0) - timeMs);
+                    if (diff < bestDiff) {
+                        bestDiff = diff;
+                        bestIndex = i;
+                    }
+                });
+
+                document
+                    .querySelectorAll(".elim-item")
+                    .forEach((el) => el.classList.remove("active"));
+                if (bestIndex >= 0) {
+                    const row = document.getElementById(`elim-${bestIndex}`);
+                    if (row) row.classList.add("active");
+                }
+            }
+
+            function msToClock(ms) {
+                const total = Math.floor((ms || 0) / 1000);
+                const m = String(Math.floor(total / 60)).padStart(2, "0");
+                const s = String(total % 60).padStart(2, "0");
+                return `${m}:${s}`;
+            }
+
+            function escapeHtml(str) {
+                return String(str)
+                    .replaceAll("&", "&amp;")
+                    .replaceAll("<", "&lt;")
+                    .replaceAll(">", "&gt;")
+                    .replaceAll('"', "&quot;")
+                    .replaceAll("'", "&#39;");
+            }
+        </script>
+    </body>
+</html>

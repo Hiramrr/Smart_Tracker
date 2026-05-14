@@ -396,7 +396,7 @@ export default function LandingPage() {
 
               <div className="fade-up visible flex flex-wrap items-center gap-4 pt-2">
                 <Link
-                  href="#features"
+                  href="/dashboard"
                   className="inline-flex items-center justify-center gap-2 bg-miyu-btn text-miyu-text border-2 border-miyu-text px-8 py-3.5 rounded-full text-sm font-bold hover:bg-miyu-btn-hover transition-colors text-center"
                 >
                   Conoce el proyecto

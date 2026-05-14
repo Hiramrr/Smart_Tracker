@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="es">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Fortnite Tracker Pro</title>
+        <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+        <style>
+            body {
+                font-family: Arial;
+                background: #020617;
+                color: white;
+                text-align: center;
+            }
+            h1 {
+                margin-top: 20px;
+            }
+            .search {
+                margin: 20px;
+            }
+            input,
+            select,
+            button {
+                padding: 10px;
+                margin: 5px;
+                border-radius: 8px;
+                border: none;
+            }
+            button {
+                background: #22c55e;
+                color: white;
+                cursor: pointer;
+            }
+            .container {
+                display: flex;
+                flex-wrap: wrap;
+                justify-content: center;
+                gap: 20px;
+            }
+            .card {
+                background: #0f172a;
+                padding: 20px;
+                border-radius: 12px;
+                width: 280px;
+            }
+            canvas {
+                background: white;
+                border-radius: 10px;
+                margin-top: 20px;
+            }
+        </style>
+    </head>
+    <body>
+        <h1>Fortnite Tracker Pro</h1>
+
+        <div class="search">
+            <input type="text" id="username" placeholder="Usuario" />
+            <select id="platform">
+                <option value="epic">Epic</option>
+                <option value="psn">PlayStation</option>
+                <option value="xbl">Xbox</option>
+            </select>
+            <button onclick="buscar()">Buscar</button>
+        </div>
+
+        <div id="resultado" class="container"></div>
+        <canvas id="chart" width="400" height="200"></canvas>
+
+        <script>
+            const API_KEY = "949d097e-6d80-4676-b676-e555bbe42401 ";
+            let chart;
+
+            async function buscar() {
+                const user = document.getElementById("username").value;
+                const platform = document.getElementById("platform").value;
+
+                const res = await fetch(
+                    `https://fortnite-api.com/v2/stats/br/v2?name=${user}&accountType=${platform}`,
+                    {
+                        headers: { Authorization: API_KEY },
+                    },
+                );
+
+                const data = await res.json();
+
+                if (data.status !== 200) {
+                    document.getElementById("resultado").innerHTML =
+                        "Usuario no encontrado";
+                    return;
+                }
+
+                const stats = data.data.stats.all;
+
+                renderStats(user, stats);
+                renderChart(stats);
+            }
+
+            function renderStats(user, stats) {
+                const modes = ["overall", "solo", "duo", "trio", "squad"];
+                let html = "";
+
+                modes.forEach((mode) => {
+                    if (!stats[mode]) return;
+
+                    html += `
+      <div class="card">
+        <h2>${mode.toUpperCase()}</h2>
+        <p>Wins: ${stats[mode].wins}</p>
+        <p>Kills: ${stats[mode].kills}</p>
+        <p>K/D: ${stats[mode].kd}</p>
+        <p>Matches: ${stats[mode].matches}</p>
+        <p>Win %: ${stats[mode].winRate}</p>
+        <p>Top 10: ${stats[mode].top10}</p>
+        <p>Top 25: ${stats[mode].top25}</p>
+      </div>
+    `;
+                });
+
+                document.getElementById("resultado").innerHTML = html;
+            }
+
+            function renderChart(stats) {
+                const data = {
+                    labels: ["Wins", "Kills", "Matches"],
+                    datasets: [
+                        {
+                            label: "Overall",
+                            data: [
+                                stats.overall.wins,
+                                stats.overall.kills,
+                                stats.overall.matches,
+                            ],
+                        },
+                    ],
+                };
+
+                if (chart) chart.destroy();
+
+                chart = new Chart(document.getElementById("chart"), {
+                    type: "bar",
+                    data: data,
+                });
+            }
+        </script>
+    </body>
+</html>

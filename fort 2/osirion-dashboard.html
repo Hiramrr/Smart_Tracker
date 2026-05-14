@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fortnite Stats UI</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            background-color: #ffffff;
+            color: #000000;
+            font-family: 'Courier New', Courier, monospace;
+        }
+        .border-dashed-custom {
+            border-top: 1px dashed #ccc;
+        }
+        .ascii-art {
+            white-space: pre;
+            line-height: 1.1;
+            font-size: 14px;
+            color: #444;
+            margin: 0 auto;
+            width: fit-content;
+            text-align: left;
+        }
+        input:focus {
+            outline: none;
+        }
+        .toggle-btn.active {
+            font-weight: bold;
+            background: #000;
+            color: #fff;
+        }
+    </style>
+</head>
+<body class="min-h-screen p-8 flex justify-center selection:bg-black selection:text-white">
+    <div class="w-full max-w-3xl flex flex-col min-h-[calc(100vh-4rem)]">
+
+        <!-- Header / Window Controls -->
+        <div class="flex justify-between items-start">
+            <div class="text-sm font-bold text-gray-500">[fortnite stats]</div>
+        </div>
+
+        <!-- ASCII Art -->
+        <div class="mt-8 mb-12">
+            <div class="ascii-art">
+▒▒▒▒         ▒▒▒▒
+ ▒▒▒▒▒▒▒░░░░░░▒▒▒▒
+  ▒▒░░░▒▒▒░░▒▒▒░▒▒
+  ▒▒▓▒▓▒░░░░▒▒▓█▓▒
+ ▒░▒▓▓▓▒▒▒░░░▒▒▓▓▒▒
+ ░▒▒░░░░░░▒▒▒▒▒▒▒▒▒
+ ░░▒▒▒░░░▒▓▓▓▓▓▓▒▒▒
+ ░░░▒░░░░░▒▓▓█▓▒▒▒▒
+░░░░░░▒▒▒▒▒▓▓▓▓▓▓▒▒
+░░░░░░░▒▒▓▓▓▓▓▓▓▓
+░░░░░░▒▒▒▒▓▓▓▓▓▓▓</div>
+        </div>
+
+        <!-- Search Input -->
+        <div class="border border-black p-3 flex items-center gap-3">
+            <span class="text-black font-bold">$</span>
+            <input type="text" id="searchInput" placeholder="buscar jugador epic... (/)" class="w-full bg-transparent text-black placeholder-gray-400 font-mono text-sm" autocomplete="off" spellcheck="false">
+        </div>
+        <div id="errorMsg" class="hidden text-red-500 text-xs mt-3"></div>
+        <div id="loadingMsg" class="hidden text-gray-500 text-xs mt-3 animate-pulse">consultando api...</div>
+
+        <!-- Stats Section -->
+        <section id="statsSection" class="hidden flex-1 flex flex-col mt-10">
+
+            <div class="flex justify-between items-center text-sm mb-6">
+                <div class="flex gap-2">
+                    <button id="btnSeason" class="toggle-btn active border border-black px-2 py-1 cursor-pointer transition-colors text-xs">temp actual</button>
+                    <button id="btnLifetime" class="toggle-btn border border-black px-2 py-1 cursor-pointer hover:bg-gray-100 transition-colors text-xs">todas las temp</button>
+                </div>
+                <span id="levelBadge" class="hidden text-gray-500">[nivel: ?]</span>
+            </div>
+
+            <!-- Stats Grid -->
+            <div id="statsGrid" class="grid grid-cols-5 gap-6 text-left mb-12">
+                <!-- Top stats injected here -->
+            </div>
+
+            <div class="border-dashed-custom mb-6"></div>
+
+            <div class="flex justify-between text-sm mb-4">
+                <span id="metricsCount">0 métricas</span>
+                <span class="cursor-pointer hover:bg-black hover:text-white transition-colors border border-transparent hover:border-black px-1" onclick="document.getElementById('rawJsonContainer').classList.toggle('hidden')">[ver .json]</span>
+            </div>
+
+            <!-- List/Cards -->
+            <div id="detailsList" class="flex flex-col">
+                <!-- Detail items injected here -->
+            </div>
+
+            <div id="rawJsonContainer" class="hidden mt-6">
+                <div class="border border-black p-4 bg-gray-50 overflow-x-auto">
+                    <pre id="rawJson" class="text-xs text-gray-600 font-mono"></pre>
+                </div>
+            </div>
+
+            <!-- Bottom Spacer to push footer down -->
+            <div class="flex-1"></div>
+
+        </section>
+
+        <!-- Footer -->
+        <div class="flex justify-between text-xs text-gray-500 mt-12 pt-4">
+            <span>[fortnite]</span>
+            <span>[⚙]</span>
+        </div>
+
+    </div>
+
+    <script>
+        const searchInput = document.getElementById('searchInput');
+        const errorMsg = document.getElementById('errorMsg');
+        const loadingMsg = document.getElementById('loadingMsg');
+        const statsSection = document.getElementById('statsSection');
+        const statsGrid = document.getElementById('statsGrid');
+        const detailsList = document.getElementById('detailsList');
+        const rawJson = document.getElementById('rawJson');
+        const levelBadge = document.getElementById('levelBadge');
+        const btnSeason = document.getElementById('btnSeason');
+        const btnLifetime = document.getElementById('btnLifetime');
+        const metricsCount = document.getElementById('metricsCount');
+
+        const BASE_API = 'http://localhost:3001/api';
+
+        let currentAccountId = null;
+        let currentTimeframe = 'season';
+
+        // '/' shortcut to focus input
+        document.addEventListener('keydown', (e) => {
+            if (e.key === '/' && document.activeElement !== searchInput) {
+                e.preventDefault();
+                searchInput.focus();
+            }
+        });
+
+        btnSeason.addEventListener('click', () => setTimeframe('season'));
+        btnLifetime.addEventListener('click', () => setTimeframe('lifetime'));
+
+        async function setTimeframe(tf) {
+            if (currentTimeframe === tf) return;
+            currentTimeframe = tf;
+
+            btnSeason.className = tf === 'season' ? 'toggle-btn active border border-black px-2 py-1 cursor-pointer transition-colors text-xs' : 'toggle-btn border border-black px-2 py-1 cursor-pointer hover:bg-gray-100 transition-colors text-xs';
+            btnLifetime.className = tf === 'lifetime' ? 'toggle-btn active border border-black px-2 py-1 cursor-pointer transition-colors text-xs' : 'toggle-btn border border-black px-2 py-1 cursor-pointer hover:bg-gray-100 transition-colors text-xs';
+
+            if (currentAccountId) {
+                await fetchStats(currentAccountId);
+            }
+        }
+
+        searchInput.addEventListener('keypress', async (e) => {
+            if (e.key === 'Enter') {
+                const query = searchInput.value.trim();
+                if (!query) return;
+
+                errorMsg.classList.add('hidden');
+                loadingMsg.classList.remove('hidden');
+                statsSection.classList.add('hidden');
+                searchInput.disabled = true;
+
+                try {
+                    let accountId = query;
+
+                    // Resolve Username
+                    if (query.length !== 32 || !/^[0-9a-f]+$/i.test(query)) {
+                        loadingMsg.textContent = 'resolviendo usuario...';
+                        const lookupRes = await fetch(`${BASE_API}/lookup?displayName=${encodeURIComponent(query)}`);
+
+                        if (lookupRes.status === 404) throw new Error(`jugador "${query}" no encontrado.`);
+                        if (!lookupRes.ok) throw new Error(`error en lookup: ${lookupRes.status}`);
+
+                        const lookupData = await lookupRes.json();
+                        if (!lookupData.success || !lookupData.accountId) throw new Error(`no se resolvió el id para "${query}".`);
+                        accountId = lookupData.accountId;
+                    }
+
+                    currentAccountId = accountId;
+                    await fetchStats(accountId);
+
+                } catch (err) {
+                    console.error("Error:", err);
+                    if (err.message === "Failed to fetch") {
+                        showError('error de red (CORS o proxy apagado). asegúrate de correr proxy-server.js');
+                    } else {
+                        showError(err.message.toLowerCase());
+                    }
+                } finally {
+                    searchInput.disabled = false;
+                    loadingMsg.classList.add('hidden');
+                    searchInput.focus();
+                }
+            }
+        });
+
+        async function fetchStats(accountId) {
+            loadingMsg.textContent = 'obteniendo estadísticas...';
+            loadingMsg.classList.remove('hidden');
+            statsSection.classList.add('hidden');
+
+            try {
+                const [statsRes, rankedRes] = await Promise.all([
+                    fetch(`${BASE_API}/stats?accountId=${accountId}&timeframe=${currentTimeframe}`),
+                    fetch(`${BASE_API}/ranked-current?accountId=${accountId}`)
+                ]);
+
+                if (!statsRes.ok) throw new Error(`error en stats: ${statsRes.status}`);
+
+                const statsData = await statsRes.json();
+                if (!statsData.success) throw new Error('api devolvió error.');
+
+                let rankedData = { success: false, rank: null };
+                if (rankedRes.ok) {
+                    const rankedJson = await rankedRes.json();
+                    if (rankedJson?.success) rankedData = rankedJson;
+                }
+
+                renderStats(statsData, rankedData);
+            } catch(err) {
+                console.error("Error:", err);
+                showError(err.message.toLowerCase());
+            } finally {
+                loadingMsg.classList.add('hidden');
+            }
+        }
+
+        function showError(msg) {
+            errorMsg.textContent = msg;
+            errorMsg.classList.remove('hidden');
+        }
+
+        function renderStats(data, rankedData) {
+            statsSection.classList.remove('hidden');
+            statsGrid.innerHTML = '';
+            detailsList.innerHTML = '';
+            rawJson.textContent = JSON.stringify({ stats: data, ranked: rankedData }, null, 2);
+
+            // Handle Level Badge
+            if (data.seasonLevels && data.seasonLevels.length > 0) {
+                levelBadge.textContent = `[nivel: ${data.seasonLevels[0].level}]`;
+                levelBadge.classList.remove('hidden');
+            } else {
+                levelBadge.classList.add('hidden');
+            }
+
+            let totalKills = 0;
+            let totalMatches = 0;
+            let totalWins = 0;
+            let totalMinutes = 0;
+            let totalScore = 0;
+            let top5 = 0;
+            let top12 = 0;
+
+            if (data.groupedStats) {
+                for (const inputMethod of Object.values(data.groupedStats)) {
+                    for (const modeStats of Object.values(inputMethod)) {
+                        totalKills += modeStats.kills || 0;
+                        totalMatches += modeStats.matchesplayed || 0;
+                        totalWins += modeStats.placetop1 || 0;
+                        totalMinutes += modeStats.minutesplayed || 0;
+                        totalScore += modeStats.score || 0;
+                        top5 += modeStats.placetop5 || 0;
+                        top12 += modeStats.placetop12 || 0;
+                    }
+                }
+            }
+
+            const rankLabel = formatCurrentRank(rankedData?.rank);
+            const kdRatio = totalMatches > 0 && totalMatches - totalWins > 0
+                ? (totalKills / (totalMatches - totalWins)).toFixed(2)
+                : '—';
+
+            const winRate = totalMatches > 0
+                ? ((totalWins / totalMatches) * 100).toFixed(1) + '%'
+                : '0%';
+
+            createTopStat('rango actual', rankLabel);
+            createTopStat('k/d ratio', kdRatio);
+            createTopStat('win rate', winRate);
+            createTopStat('victorias', totalWins);
+            createTopStat('partidas', totalMatches);
+
+            // Detail List Boxes
+            const avgKills = totalMatches > 0 ? (totalKills/totalMatches).toFixed(1) : 0;
+            const hours = (totalMinutes/60).toFixed(1);
+
+            createDetailBox('Eliminaciones', `${totalKills} kills / ${avgKills} avg`, `${totalKills} totales`);
+            createDetailBox('Tiempo Jugado', `${totalMinutes} min / ${hours} hrs`, `${totalMinutes} min`);
+            createDetailBox('Top Posiciones', `Top 5: ${top5} / Top 12: ${top12}`, `${top5 + top12} tops`);
+            createDetailBox('Puntuación', `+${totalScore} xp`, `${totalScore} pts`);
+            createDetailBox(
+                'Rango temporada',
+                rankedData?.rank?.rankingType ? `${rankLabel} (${rankedData.rank.rankingType})` : rankLabel,
+                rankedData?.rank?.rankingTrackId || '—'
+            );
+
+            metricsCount.textContent = "5 métricas";
+        }
+
+        function formatCurrentRank(rank) {
+            if (!rank) return 'sin rank';
+
+            const divisionName = rank.currentDivision?.divisionName;
+            if (!divisionName) return 'sin rank';
+
+            if (divisionName.toLowerCase() === 'unreal' && Number.isInteger(rank.currentPlayerRanking)) {
+                return `unreal #${rank.currentPlayerRanking}`;
+            }
+            if (Number.isInteger(rank.promotionProgress)) {
+                return `${divisionName} (${rank.promotionProgress}%)`;
+            }
+            return divisionName;
+        }
+
+        function createTopStat(label, value) {
+            const div = document.createElement('div');
+            div.className = 'space-y-2';
+            div.innerHTML = `
+                <div class="font-bold text-lg leading-none">${value}</div>
+                <div class="text-xs text-gray-500 lowercase">${label}</div>
+            `;
+            statsGrid.appendChild(div);
+        }
+
+        function createDetailBox(title, subtitle, rightText) {
+            const div = document.createElement('div');
+            div.className = 'border-b border-gray-200 py-4 flex justify-between items-center text-sm hover:bg-gray-50 transition-colors px-2';
+            div.innerHTML = `
+                <div class="flex items-baseline gap-4">
+                    <strong class="text-black uppercase text-xs tracking-wider">${title}</strong>
+                    <span class="text-gray-400 font-mono text-xs">${subtitle}</span>
+                </div>
+                <div class="font-mono text-sm font-bold text-black">${rightText}</div>
+            `;
+            detailsList.appendChild(div);
+        }
+    </script>
+</body>
+</html>
