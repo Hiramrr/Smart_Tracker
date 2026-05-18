@@ -1,0 +1,150 @@
+version: "3.8"
+
+services:
+  # ==========================================
+  # Base de datos PostgreSQL (Data Lake)
+  # ==========================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: miyu-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-miyu}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-miyu_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-miyu_datalake}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./sql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-miyu} -d ${POSTGRES_DB:-miyu_datalake}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - miyu-network
+
+  # ==========================================
+  # Zookeeper (requerido por Kafka)
+  # ==========================================
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.0
+    container_name: miyu-zookeeper
+    restart: unless-stopped
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+    networks:
+      - miyu-network
+
+  # ==========================================
+  # Apache Kafka
+  # ==========================================
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    container_name: miyu-kafka
+    restart: unless-stopped
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_MESSAGE_MAX_BYTES: "5242880"
+      KAFKA_REPLICA_FETCH_MAX_BYTES: "5242880"
+      KAFKA_FETCH_MESSAGE_MAX_BYTES: "5242880"
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:29092"]
+      interval: 5s
+      timeout: 10s
+      retries: 10
+    networks:
+      - miyu-network
+
+  # ==========================================
+  # Kafka UI (Interfaz web para monitorear Kafka)
+  # ==========================================
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: miyu-kafka-ui
+    restart: unless-stopped
+    depends_on:
+      - kafka
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: miyu-cluster
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+      KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
+    networks:
+      - miyu-network
+
+  # ==========================================
+  # Aplicación Next.js (Miyu Tracker)
+  # ==========================================
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: miyu-app
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env.local
+    environment:
+      # Base de datos
+      DATABASE_URL: postgres://${POSTGRES_USER:-miyu}:${POSTGRES_PASSWORD:-miyu_secret}@postgres:5432/${POSTGRES_DB:-miyu_datalake}
+      # Kafka
+      KAFKA_BROKER: kafka:29092
+      KAFKA_TOPIC_API_CALLS: api-calls
+    networks:
+      - miyu-network
+
+  # ==========================================
+  # Consumer de Kafka (Persistencia en Data Lake)
+  # ==========================================
+  consumer:
+    build:
+      context: .
+      dockerfile: consumer/Dockerfile
+    container_name: miyu-consumer
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    environment:
+      # Base de datos
+      DATABASE_URL: postgres://${POSTGRES_USER:-miyu}:${POSTGRES_PASSWORD:-miyu_secret}@postgres:5432/${POSTGRES_DB:-miyu_datalake}
+      # Kafka
+      KAFKA_BROKER: kafka:29092
+      KAFKA_TOPIC_API_CALLS: api-calls
+      KAFKA_GROUP_ID: datalake-consumer
+    networks:
+      - miyu-network
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  miyu-network:
+    driver: bridge

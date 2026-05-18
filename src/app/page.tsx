@@ -296,13 +296,13 @@ export default function LandingPage() {
               href="https://github.com/smart"
               target="_blank"
               rel="noopener noreferrer"
-              className="hidden md:inline-flex items-center gap-2 border border-miyu-text rounded-full px-4 py-1.5 text-sm font-medium hover:bg-miyu-text hover:text-white transition-all"
+              className="hidden md:inline-flex items-center gap-2 border border-miyu-text bg-miyu-btn rounded-full px-4 py-1.5 text-sm font-medium hover:bg-miyu-btn-hover transition-all"
             >
               <GithubIcon className="w-4 h-4" />
               GitHub
             </a>
             <button
-              className="md:hidden p-1"
+              className="md:hidden rounded-full border border-miyu-text bg-miyu-btn p-1 hover:bg-miyu-btn-hover"
               onClick={() => setMenuOpen((v) => !v)}
               aria-label="Toggle menu"
             >
@@ -330,7 +330,7 @@ export default function LandingPage() {
               href="https://github.com/smart"
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 border border-miyu-text rounded-full px-4 py-1.5 text-sm font-medium mt-2 hover:bg-miyu-text hover:text-white transition-all"
+              className="inline-flex items-center gap-2 border border-miyu-text bg-miyu-btn rounded-full px-4 py-1.5 text-sm font-medium mt-2 hover:bg-miyu-btn-hover transition-all"
             >
               <GithubIcon className="w-4 h-4" />
               GitHub
@@ -396,7 +396,7 @@ export default function LandingPage() {
 
               <div className="fade-up visible flex flex-wrap items-center gap-4 pt-2">
                 <Link
-                  href="/dashboard"
+                  href="/dashboard/player"
                   className="inline-flex items-center justify-center gap-2 bg-miyu-btn text-miyu-text border-2 border-miyu-text px-8 py-3.5 rounded-full text-sm font-bold hover:bg-miyu-btn-hover transition-colors text-center"
                 >
                   Conoce el proyecto
@@ -604,7 +604,7 @@ export default function LandingPage() {
                   analistas y equipos que buscan mejorar su rendimiento.
                 </p>
                 <Link
-                  href="#"
+                  href="/dashboard/player"
                   className="inline-flex items-center gap-1 text-miyu-accent text-sm font-medium group"
                 >
                   explorar dashboard

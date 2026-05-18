@@ -55,159 +55,6 @@ interface StatsData {
   source?: "osirion" | "tracker" | "fortnite-api";
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object";
-}
-
-function readStatValue(value: unknown): number | undefined {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value === "string") {
-    const parsed = Number(value.replace(/[%,$\s]/g, ""));
-    return Number.isFinite(parsed) ? parsed : undefined;
-  }
-  if (isRecord(value)) {
-    return readStatValue(value.value ?? value.displayValue ?? value.rank);
-  }
-  return undefined;
-}
-
-function assignStat(target: ModeStats, key: string, value: unknown) {
-  const parsed = readStatValue(value);
-  if (parsed === undefined) return;
-
-  switch (key.toLowerCase()) {
-    case "wins":
-    case "top1":
-    case "placetop1":
-      target.placetop1 = parsed;
-      break;
-    case "top3":
-    case "placetop3":
-      target.placetop3 = parsed;
-      break;
-    case "top5":
-    case "placetop5":
-      target.placetop5 = parsed;
-      break;
-    case "top6":
-    case "placetop6":
-      target.placetop6 = parsed;
-      break;
-    case "top10":
-    case "placetop10":
-      target.placetop10 = parsed;
-      break;
-    case "top12":
-    case "placetop12":
-      target.placetop12 = parsed;
-      break;
-    case "top25":
-    case "placetop25":
-      target.placetop25 = parsed;
-      break;
-    case "kills":
-      target.kills = parsed;
-      break;
-    case "matches":
-    case "matchesplayed":
-      target.matchesplayed = parsed;
-      break;
-    case "minutesplayed":
-    case "minutesplayedtotal":
-      target.minutesplayed = parsed;
-      break;
-    case "score":
-      target.score = parsed;
-      break;
-  }
-}
-
-function normalizeInputName(input: string) {
-  const normalized = input.toLowerCase().replace(/[-_\s]/g, "");
-  if (normalized === "keyboardmouse" || normalized === "keyboardandmouse") return "keyboardmouse";
-  if (normalized === "gamepad" || normalized === "controller") return "gamepad";
-  if (normalized === "touch") return "touch";
-  if (normalized === "all" || normalized === "overall") return "all";
-  return input;
-}
-
-function normalizeModeName(mode: string) {
-  const normalized = mode.toLowerCase().replace(/[-_\s]/g, "");
-  if (normalized === "solo" || normalized === "p9") return "solo";
-  if (normalized === "duo" || normalized === "duos" || normalized === "p2") return "duo";
-  if (normalized === "trio" || normalized === "trios") return "trio";
-  if (normalized === "squad" || normalized === "squads" || normalized === "p10") return "squad";
-  if (normalized === "ltm" || normalized === "other") return "ltm";
-  if (normalized === "overall" || normalized === "all") return "overall";
-  return mode;
-}
-
-function parseTrackerStats(trackerData: unknown): StatsData {
-  const root = isRecord(trackerData) ? trackerData : {};
-  const data = isRecord(root.data) ? root.data : {};
-  const segments = data.segments || root.segments || root.stats || [];
-  const groupedStats: Record<string, Record<string, ModeStats>> = {};
-
-  for (const rawSegment of Array.isArray(segments) ? segments : []) {
-    if (!isRecord(rawSegment)) continue;
-    const segment = rawSegment;
-    const metadata = isRecord(rawSegment.metadata) ? rawSegment.metadata : {};
-    const segmentKey = String(metadata.key || metadata.name || segment.type || "overall");
-    const mode = normalizeModeName(String(metadata.mode || segmentKey));
-    const method = normalizeInputName(String(metadata.input || metadata.inputType || "all"));
-    const modeStats: ModeStats = {};
-
-    if (Array.isArray(segment.entries)) {
-      for (const entry of segment.entries) {
-        if (isRecord(entry)) assignStat(modeStats, String(entry.key), entry.value);
-      }
-    } else {
-      const stats = isRecord(segment.stats) ? segment.stats : {};
-      for (const [key, value] of Object.entries(stats)) assignStat(modeStats, key, value);
-    }
-
-    if (Object.keys(modeStats).length === 0) continue;
-    if (!groupedStats[method]) groupedStats[method] = {};
-    groupedStats[method][mode] = modeStats;
-  }
-
-  return {
-    success: true,
-    groupedStats,
-    seasonLevels: [],
-    source: "tracker",
-  };
-}
-
-function parseFortniteApiStats(apiData: unknown): StatsData {
-  const root = isRecord(apiData) ? apiData : {};
-  const data = isRecord(root.data) ? root.data : {};
-  const statsByInput = isRecord(data.stats) ? data.stats : isRecord(root.stats) ? root.stats : {};
-  const groupedStats: Record<string, Record<string, ModeStats>> = {};
-
-  for (const [input, modes] of Object.entries(statsByInput)) {
-    if (!isRecord(modes)) continue;
-    const method = normalizeInputName(input);
-    groupedStats[method] = {};
-
-    for (const [modeName, rawStats] of Object.entries(modes)) {
-      if (!isRecord(rawStats)) continue;
-      const modeStats: ModeStats = {};
-      for (const [key, value] of Object.entries(rawStats)) assignStat(modeStats, key, value);
-      if (Object.keys(modeStats).length > 0) {
-        groupedStats[method][normalizeModeName(modeName)] = modeStats;
-      }
-    }
-  }
-
-  return {
-    success: true,
-    groupedStats,
-    seasonLevels: isRecord(data.battlePass) ? [{ level: readStatValue(data.battlePass.level) || 0 }] : [],
-    source: "fortnite-api",
-  };
-}
-
 function formatCurrentRank(rank: RankedData["rank"] | undefined) {
   if (!rank) return "sin rank";
 
@@ -240,35 +87,13 @@ async function fetchPlayerStats(query: string): Promise<PlayerStats> {
     displayName = lookupJson.displayName || query;
   }
 
-  let parsedStats: StatsData | null = null;
+  const statsRes = await fetch(`/api/osirion?action=stats&accountId=${encodeURIComponent(accountId)}&timeframe=season`);
+  if (!statsRes.ok) throw new Error(`error en stats: ${statsRes.status}`);
+  const statsJson: StatsData = await statsRes.json();
+  if (!statsJson.groupedStats) throw new Error("osirion no devolvio estadisticas");
+  const parsedStats: StatsData = { ...statsJson, success: true, source: "osirion" };
 
-  const trackerRes = await fetch(`/api/osirion?action=tracker-stats&displayName=${encodeURIComponent(displayName)}`);
-  if (trackerRes.ok) {
-    const trackerJson = await trackerRes.json();
-    if (trackerJson.success && trackerJson.data) {
-      parsedStats = parseTrackerStats(trackerJson.data);
-    }
-  }
-
-  if (!parsedStats || Object.keys(parsedStats.groupedStats || {}).length === 0) {
-    const fortniteApiRes = await fetch(`/api/osirion?action=fortnite-api-stats&accountId=${encodeURIComponent(accountId)}&displayName=${encodeURIComponent(displayName)}&timeframe=lifetime`);
-    if (fortniteApiRes.ok) {
-      const fortniteApiJson = await fortniteApiRes.json();
-      if (fortniteApiJson.success && fortniteApiJson.data) {
-        parsedStats = parseFortniteApiStats(fortniteApiJson.data);
-      }
-    }
-  }
-
-  if (!parsedStats || Object.keys(parsedStats.groupedStats || {}).length === 0) {
-    const statsRes = await fetch(`/api/osirion?action=stats&accountId=${accountId}&timeframe=lifetime`);
-    if (!statsRes.ok) throw new Error(`error en stats: ${statsRes.status}`);
-    const statsJson: StatsData = await statsRes.json();
-    if (!statsJson.success) throw new Error("api devolvio error");
-    parsedStats = { ...statsJson, source: "osirion" };
-  }
-
-  const rankedRes = await fetch(`/api/osirion?action=ranked-current&accountId=${accountId}`);
+  const rankedRes = await fetch(`/api/osirion?action=ranked-current&accountId=${encodeURIComponent(accountId)}`);
   let rankedJson: RankedData = { success: false, rank: null };
   if (rankedRes.ok) {
     const rankedParsed = await rankedRes.json();
@@ -454,7 +279,7 @@ export default function PlayerCompare() {
         <button
           onClick={handleCompare}
           disabled={loading1 || loading2}
-          className="border-2 border-miyu-text px-6 py-2 cursor-pointer transition-colors text-sm font-bold rounded-lg hover:bg-miyu-text hover:text-miyu-bg disabled:opacity-50 disabled:cursor-not-allowed"
+          className="border-2 border-miyu-text bg-miyu-btn px-6 py-2 cursor-pointer transition-colors text-sm font-bold rounded-lg text-miyu-text hover:bg-miyu-btn-hover disabled:opacity-50 disabled:cursor-not-allowed"
         >
           comparar
         </button>

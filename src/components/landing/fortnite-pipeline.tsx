@@ -69,7 +69,7 @@ function WaveformCapsule({ active, onReplay }: { active: boolean; onReplay?: () 
         onClick={onReplay}
         disabled={active}
         aria-label="Replay animation"
-        className="relative flex items-center justify-center px-6 py-3 rounded-full border-2 border-[#1E3932] bg-[#F5F0E8] shadow-[0_4px_24px_rgba(30,57,50,0.12)] transition-transform hover:scale-105 active:scale-95 disabled:hover:scale-100 disabled:cursor-default"
+        className="relative flex items-center justify-center px-6 py-3 rounded-full border-2 border-[#1E3932] bg-miyu-btn shadow-[0_4px_24px_rgba(30,57,50,0.12)] transition-transform hover:scale-105 hover:bg-miyu-btn-hover active:scale-95 disabled:hover:scale-100 disabled:cursor-default"
       >
         <div className={`flex items-center gap-[3px] h-5 transition-opacity ${!active ? "opacity-30 group-hover:opacity-0" : ""}`}>
           {barStyles.map((style, i) => (

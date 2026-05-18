@@ -1,5 +1,5 @@
-import OsirionDashboard from "@/components/osirion-dashboard";
+import LandingPage from "@/app/page";
 
 export default function DashboardPage() {
-  return <OsirionDashboard />;
+  return <LandingPage />;
 }

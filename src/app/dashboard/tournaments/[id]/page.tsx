@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, useMemo } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import Link from "next/link";
 
 interface EventWindow {
@@ -17,12 +17,21 @@ interface ScoreLocation {
   leaderboardEventWindowId: string;
   isMain: boolean;
   scoringRules?: ScoringRule[];
+  payoutTables?: PayoutTable[];
 }
 
 interface ScoringRule {
   trackedStat: string;
   matchRule: string;
   rewardTiers?: { keyValue: string; pointsEarned: number; multiplicative: boolean }[];
+}
+
+interface PayoutTable {
+  scoringType: string;
+  ranks?: {
+    threshold: number;
+    payouts?: { rewardType: string; rewardMode?: string; value: string; quantity: number }[];
+  }[];
 }
 
 interface Tournament {
@@ -69,7 +78,7 @@ interface LeaderboardData {
   };
 }
 
-type TabType = "info" | "leaderboards" | "team" | "player" | "event" | "timeline";
+type TabType = "info" | "leaderboards" | "timeline";
 
 function formatDate(dateStr: string): string {
   return new Date(dateStr).toLocaleDateString("es-ES", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
@@ -108,10 +117,8 @@ function getTournamentStatus(tournament: Tournament): "past" | "upcoming" | "liv
   const windows = tournament.eventWindows || [];
   if (windows.length === 0) return "past";
   const hasFutureWindow = windows.some(w => new Date(w.beginTime) > now);
-  const hasPastWindow = windows.some(w => new Date(w.endTime) < now);
   const hasLiveWindow = windows.some(w => new Date(w.beginTime) <= now && new Date(w.endTime) >= now);
   if (hasLiveWindow) return "live";
-  if (hasFutureWindow && hasPastWindow) return "live";
   if (hasFutureWindow) return "upcoming";
   return "past";
 }
@@ -121,8 +128,114 @@ function TournamentImage({ tournament, className }: { tournament: Tournament; cl
     tournament.displayData?.playlistTileImage ||
     tournament.displayData?.posterBackImage;
   if (!imageUrl) return <div className={`bg-miyu-surface ${className}`} />;
-  return <img src={imageUrl} alt="" className={`object-cover ${className}`} onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />;
+  const localUrl = `/api/tournament-image?eventId=${encodeURIComponent(tournament.eventId)}&type=square&url=${encodeURIComponent(imageUrl)}`;
+  return (
+    <img
+      src={localUrl}
+      alt=""
+      className={`object-cover ${className}`}
+      onError={(e) => {
+        const image = e.target as HTMLImageElement;
+        if (image.src !== imageUrl) image.src = imageUrl;
+        else image.style.display = "none";
+      }}
+    />
+  );
 }
+
+const COUNTRY_CODES: Record<string, string> = {
+  argentina: "AR",
+  australia: "AU",
+  austria: "AT",
+  belgium: "BE",
+  brazil: "BR",
+  canada: "CA",
+  chile: "CL",
+  china: "CN",
+  colombia: "CO",
+  denmark: "DK",
+  england: "GB",
+  finland: "FI",
+  france: "FR",
+  germany: "DE",
+  ireland: "IE",
+  italy: "IT",
+  japan: "JP",
+  korea: "KR",
+  mexico: "MX",
+  netherlands: "NL",
+  newzealand: "NZ",
+  norway: "NO",
+  peru: "PE",
+  poland: "PL",
+  portugal: "PT",
+  russia: "RU",
+  southkorea: "KR",
+  spain: "ES",
+  sweden: "SE",
+  switzerland: "CH",
+  turkey: "TR",
+  uk: "GB",
+  ukraine: "UA",
+  unitedkingdom: "GB",
+  unitedstates: "US",
+  usa: "US",
+};
+
+function flagTokenToCountryCode(flagToken: string | null) {
+  if (!flagToken) return null;
+  const key = flagToken
+    .replace(/^GroupIdentity_GeoIdentity_/i, "")
+    .toLowerCase()
+    .replace(/[^a-z]/g, "");
+  return COUNTRY_CODES[key] || null;
+}
+
+function countryCodeToEmoji(countryCode: string | null) {
+  if (!countryCode || countryCode.length !== 2) return null;
+  return countryCode
+    .toUpperCase()
+    .split("")
+    .map((char) => String.fromCodePoint(127397 + char.charCodeAt(0)))
+    .join("");
+}
+
+function playerLabel(player: LeaderboardEntry["players"][number]) {
+  const flag = countryCodeToEmoji(flagTokenToCountryCode(player.flagToken));
+  return `${flag ? `${flag} ` : ""}${player.username || player.accountId.slice(0, 8)}`;
+}
+
+function playerProfileHref(player: LeaderboardEntry["players"][number]) {
+  const params = new URLSearchParams({ player: player.accountId });
+  if (player.username) params.set("displayName", player.username);
+  return `/dashboard/player?${params.toString()}`;
+}
+
+function formatPrize(quantity: number, value: string) {
+  if (value === "USD") {
+    return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(quantity);
+  }
+  return `${quantity.toLocaleString("es-MX")} ${value}`;
+}
+
+function formatScoringRule(rule: ScoringRule) {
+  const label = formatStatLabel(rule.trackedStat);
+  const tiers = rule.rewardTiers || [];
+  if (tiers.length === 0) return `${label}: sin reglas publicadas`;
+  const first = tiers[0];
+  const suffix = first.multiplicative ? "por vez" : "pts";
+  if (rule.trackedStat === "TEAM_ELIMS_STAT_INDEX") return `${label}: ${first.pointsEarned} pt ${suffix}`;
+  if (rule.trackedStat === "PLACEMENT_STAT_INDEX") return `${label}: top ${first.keyValue}+ gana ${first.pointsEarned} pt`;
+  return `${label}: ${tiers.length} niveles`;
+}
+
+function getMainScoreLocation(tournament: Tournament) {
+  return tournament.eventWindows
+    .flatMap((window) => window.scoreLocations || [])
+    .find((location) => location.isMain) || tournament.eventWindows.flatMap((window) => window.scoreLocations || [])[0];
+}
+
+const TOURNAMENT_REGIONS = ["ASIA", "BR", "EU", "ME", "NAC", "NAE", "NAW", "OCE", "ONSITE"];
 
 function getTrackedStat(stats: Record<string, number>, ...keys: string[]) {
   for (const key of keys) {
@@ -181,6 +294,7 @@ function LeaderboardPanel({ leaderboardEventId, leaderboardEventWindowId, roundN
   const [selectedEntry, setSelectedEntry] = useState<LeaderboardEntry | null>(null);
 
   const fetchLeaderboard = useCallback(async () => {
+    await Promise.resolve();
     setLoading(true);
     setError(null);
     try {
@@ -195,7 +309,10 @@ function LeaderboardPanel({ leaderboardEventId, leaderboardEventWindowId, roundN
     }
   }, [leaderboardEventId, leaderboardEventWindowId, page]);
 
-  useEffect(() => { fetchLeaderboard(); }, [fetchLeaderboard]);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void fetchLeaderboard();
+  }, [fetchLeaderboard]);
 
   const filteredEntries = useMemo(() => {
     if (!leaderboard?.leaderboard?.entries) return [];
@@ -219,6 +336,13 @@ function LeaderboardPanel({ leaderboardEventId, leaderboardEventWindowId, roundN
     <div className="flex gap-6">
       {/* Main leaderboard table */}
       <div className="flex-1 min-w-0">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <h2 className="font-mono text-sm font-bold text-miyu-text">{roundName}</h2>
+          <span className="font-mono text-xs text-miyu-text-muted">
+            Actualizado: {updatedAt ? formatDate(updatedAt) : "N/D"}
+          </span>
+        </div>
+
         {/* Search and controls */}
         <div className="flex items-center gap-3 mb-4">
           <div className="relative flex-1">
@@ -226,17 +350,17 @@ function LeaderboardPanel({ leaderboardEventId, leaderboardEventWindowId, roundN
               type="text"
               value={searchPlayer}
               onChange={(e) => setSearchPlayer(e.target.value)}
-              placeholder="Search for a player"
-              className="w-full px-3 py-2 bg-miyu-surface border border-miyu-border rounded-lg text-sm text-miyu-text placeholder-miyu-text-muted/60 focus:outline-none focus:border-[#204E46]"
+              placeholder="Buscar jugador"
+              className="w-full px-3 py-2 bg-miyu-surface border border-miyu-border rounded-lg text-sm text-miyu-text placeholder-miyu-text-muted/60 focus:outline-none focus:border-miyu-text"
             />
           </div>
           <div className="flex items-center gap-2 text-xs text-miyu-text-muted">
-            <button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0} className="px-3 py-2 border border-miyu-border rounded-lg disabled:opacity-30 hover:bg-miyu-surface transition-colors">
-              ← Previous
+            <button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0} className="px-3 py-2 border border-miyu-text bg-miyu-btn text-miyu-text rounded-lg disabled:opacity-30 hover:bg-miyu-btn-hover transition-colors">
+              Anterior
             </button>
-            <span className="font-mono">Page {page + 1} of {totalPages}</span>
-            <button onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))} disabled={page >= totalPages - 1} className="px-3 py-2 border border-miyu-border rounded-lg disabled:opacity-30 hover:bg-miyu-surface transition-colors">
-              Next →
+            <span className="font-mono">Pagina {page + 1} de {totalPages}</span>
+            <button onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))} disabled={page >= totalPages - 1} className="px-3 py-2 border border-miyu-text bg-miyu-btn text-miyu-text rounded-lg disabled:opacity-30 hover:bg-miyu-btn-hover transition-colors">
+              Siguiente
             </button>
           </div>
         </div>
@@ -259,7 +383,6 @@ function LeaderboardPanel({ leaderboardEventId, leaderboardEventWindowId, roundN
               </thead>
               <tbody>
                 {filteredEntries.map((entry) => {
-                  const playerNames = entry.players.map(p => p.username || p.accountId.slice(0, 8)).join(" + ");
                   const lastSession = entry.sessionHistory?.[entry.sessionHistory.length - 1];
                   const stats = lastSession?.trackedStats || {};
                   const isSelected = selectedEntry?.teamId === entry.teamId;
@@ -271,7 +394,7 @@ function LeaderboardPanel({ leaderboardEventId, leaderboardEventWindowId, roundN
                       key={entry.teamId}
                       onClick={() => setSelectedEntry(isSelected ? null : entry)}
                       className={`border-b border-miyu-border/50 cursor-pointer transition-colors ${
-                        isSelected ? "bg-[#204E46]/10" : "hover:bg-miyu-bg"
+                        isSelected ? "bg-miyu-btn/50" : "hover:bg-miyu-bg"
                       } ${entry.rank === 1 ? "bg-yellow-500/5" : ""}`}
                     >
                       <td className="py-3 px-4 font-mono">
@@ -283,7 +406,22 @@ function LeaderboardPanel({ leaderboardEventId, leaderboardEventWindowId, roundN
                           <span className="text-miyu-text-muted">{entry.rank}</span>
                         )}
                       </td>
-                      <td className="py-3 px-4 text-miyu-text font-medium">{playerNames}</td>
+                      <td className="py-3 px-4 text-miyu-text font-medium">
+                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                          {entry.players.map((player, index) => (
+                            <span key={player.accountId} className="inline-flex items-center gap-2">
+                              {index > 0 && <span className="text-miyu-text-muted">+</span>}
+                              <Link
+                                href={playerProfileHref(player)}
+                                onClick={(event) => event.stopPropagation()}
+                                className="rounded bg-miyu-btn px-2 py-1 text-miyu-text underline-offset-2 hover:bg-miyu-btn-hover hover:underline"
+                              >
+                                {playerLabel(player)}
+                              </Link>
+                            </span>
+                          ))}
+                        </div>
+                      </td>
                       <td className="py-3 px-4 text-right font-mono font-bold text-miyu-text">{entry.pointsEarned}</td>
                       <td className="py-3 px-4 text-right font-mono text-miyu-text-muted">{matchesPlayed || "—"}</td>
                       <td className="py-3 px-4 text-right font-mono text-miyu-text-muted">
@@ -302,12 +440,12 @@ function LeaderboardPanel({ leaderboardEventId, leaderboardEventWindowId, roundN
 
         {/* Pagination */}
         <div className="flex items-center justify-between mt-4">
-          <button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0} className="px-4 py-2 border border-miyu-border rounded-lg text-sm disabled:opacity-30 hover:bg-miyu-surface transition-colors">
-            ← Previous Page
+          <button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0} className="px-4 py-2 border border-miyu-text bg-miyu-btn text-miyu-text rounded-lg text-sm disabled:opacity-30 hover:bg-miyu-btn-hover transition-colors">
+            Pagina anterior
           </button>
-          <span className="text-sm text-miyu-text-muted font-mono">Page {page + 1} of {totalPages}</span>
-          <button onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))} disabled={page >= totalPages - 1} className="px-4 py-2 border border-miyu-border rounded-lg text-sm disabled:opacity-30 hover:bg-miyu-surface transition-colors">
-            Next Page →
+          <span className="text-sm text-miyu-text-muted font-mono">Pagina {page + 1} de {totalPages}</span>
+          <button onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))} disabled={page >= totalPages - 1} className="px-4 py-2 border border-miyu-text bg-miyu-btn text-miyu-text rounded-lg text-sm disabled:opacity-30 hover:bg-miyu-btn-hover transition-colors">
+            Pagina siguiente
           </button>
         </div>
       </div>
@@ -321,12 +459,17 @@ function LeaderboardPanel({ leaderboardEventId, leaderboardEventWindowId, roundN
             </div>
 
             <div className="space-y-2 mb-4">
-              {selectedEntry.players.map((p, i) => (
+              {selectedEntry.players.map((p) => (
                 <div key={p.accountId} className="flex items-center gap-2 text-sm">
-                  {p.flagToken && (
-                    <span className="text-lg">{p.flagToken}</span>
+                  {countryCodeToEmoji(flagTokenToCountryCode(p.flagToken)) && (
+                    <span className="text-lg" title={p.flagToken || undefined}>{countryCodeToEmoji(flagTokenToCountryCode(p.flagToken))}</span>
                   )}
-                  <span className="text-miyu-text font-medium">{p.username || p.accountId.slice(0, 8)}</span>
+                  <Link
+                    href={playerProfileHref(p)}
+                    className="rounded bg-miyu-btn px-2 py-1 text-miyu-text font-medium underline-offset-2 hover:bg-miyu-btn-hover hover:underline"
+                  >
+                    {p.username || p.accountId.slice(0, 8)}
+                  </Link>
                 </div>
               ))}
             </div>
@@ -379,7 +522,6 @@ function LeaderboardPanel({ leaderboardEventId, leaderboardEventWindowId, roundN
 
 export default function TournamentDetailPage() {
   const params = useParams();
-  const router = useRouter();
   const tournamentId = params.id as string;
 
   const [tournament, setTournament] = useState<Tournament | null>(null);
@@ -392,17 +534,39 @@ export default function TournamentDetailPage() {
     async function fetchTournament() {
       setLoading(true);
       try {
-        const res = await fetch(`/api/osirion?action=tournaments&lang=es&includeHistoricData=true`);
-        const data = await res.json();
-        if (data.success && data.tournaments) {
-          const found = data.tournaments.find((t: Tournament) => t.eventId === tournamentId);
-          if (found) setTournament(found);
-          else setError("Torneo no encontrado");
-        } else {
-          setError(data.error || "Error al cargar torneo");
+        const fetchTournamentSet = async (region?: string) => {
+          const params = new URLSearchParams({ action: "tournaments", lang: "es", includeHistoricData: "true" });
+          if (region) params.set("region", region);
+          const res = await fetch(`/api/osirion?${params.toString()}`);
+          const data = await res.json();
+          if (!data.success) throw new Error(data.error || "Error al cargar torneo");
+          return data.tournaments as Tournament[];
+        };
+
+        let found = (await fetchTournamentSet()).find((t) => t.eventId === tournamentId);
+        if (!found) {
+          for (const region of TOURNAMENT_REGIONS) {
+            found = (await fetchTournamentSet(region)).find((t) => t.eventId === tournamentId);
+            if (found) break;
+          }
         }
-      } catch (err: any) {
-        setError(err.message);
+
+        if (!found) {
+          setError("Torneo no encontrado");
+          return;
+        }
+
+        setTournament(found);
+        const now = new Date();
+        const roundsWithLeaderboard = found.eventWindows.filter((w) => (w.scoreLocations?.length ?? 0) > 0);
+        const preferredRound =
+          roundsWithLeaderboard.find((w) => new Date(w.beginTime) <= now && new Date(w.endTime) >= now) ||
+          roundsWithLeaderboard.find((w) => new Date(w.beginTime) > now) ||
+          roundsWithLeaderboard[0] ||
+          null;
+        setSelectedRound(preferredRound);
+      } catch (err: unknown) {
+        setError(err instanceof Error ? err.message : "Error al cargar torneo");
       } finally {
         setLoading(false);
       }
@@ -436,15 +600,24 @@ export default function TournamentDetailPage() {
   const imageUrl = tournament.displayData?.tournamentViewBackgroundImage || tournament.displayData?.posterBackImage;
 
   const mainScoreLocation = selectedRound?.scoreLocations?.find(s => s.isMain) || selectedRound?.scoreLocations?.[0];
-  const allScoreLocations = tournament.eventWindows.flatMap(w => w.scoreLocations || []);
+  const tournamentMainScoreLocation = getMainScoreLocation(tournament);
+  const leaderboardRounds = tournament.eventWindows.filter((w) => (w.scoreLocations?.length ?? 0) > 0);
+  const firstRound = tournament.eventWindows.reduce<EventWindow | null>((earliest, window) => {
+    if (!earliest) return window;
+    return new Date(window.beginTime) < new Date(earliest.beginTime) ? window : earliest;
+  }, null);
+  const lastRound = tournament.eventWindows.reduce<EventWindow | null>((latest, window) => {
+    if (!latest) return window;
+    return new Date(window.endTime) > new Date(latest.endTime) ? window : latest;
+  }, null);
+  const prizeRows = tournamentMainScoreLocation?.payoutTables?.flatMap((table) => table.ranks || []) || [];
+  const topPrize = prizeRows[0]?.payouts?.[0];
+  const scoringRules = tournamentMainScoreLocation?.scoringRules || [];
 
   const tabs: { key: TabType; label: string }[] = [
-    { key: "info", label: "Event Info" },
-    { key: "leaderboards", label: "Leaderboards" },
-    { key: "team", label: "Team Stats" },
-    { key: "player", label: "Player Stats" },
-    { key: "event", label: "Event Stats" },
-    { key: "timeline", label: "Timeline" },
+    { key: "info", label: "Resumen" },
+    { key: "leaderboards", label: "Leaderboard" },
+    { key: "timeline", label: "Calendario" },
   ];
 
   return (
@@ -454,7 +627,7 @@ export default function TournamentDetailPage() {
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-4 h-4">
           <path d="M15 18l-6-6 6-6" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
-        Tournaments
+        Torneos
       </Link>
 
       {/* Header */}
@@ -496,8 +669,8 @@ export default function TournamentDetailPage() {
             onClick={() => setActiveTab(tab.key)}
             className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors whitespace-nowrap ${
               activeTab === tab.key
-                ? "bg-[#204E46] text-white"
-                : "text-miyu-text-muted hover:text-miyu-text"
+                ? "bg-miyu-btn text-miyu-text border border-miyu-text"
+                : "bg-miyu-btn text-miyu-text hover:bg-miyu-btn-hover"
             }`}
           >
             {tab.label}
@@ -514,29 +687,67 @@ export default function TournamentDetailPage() {
             </div>
           )}
 
-          {/* Stats */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             <div className="bg-miyu-surface border border-miyu-border rounded-xl p-4">
-              <div className="text-xs text-miyu-text-muted mb-1">Total Rounds</div>
+              <div className="text-xs text-miyu-text-muted mb-1">Rondas</div>
               <div className="text-2xl font-bold font-mono text-miyu-text">{tournament.eventWindows?.length || 0}</div>
             </div>
             <div className="bg-miyu-surface border border-miyu-border rounded-xl p-4">
-              <div className="text-xs text-miyu-text-muted mb-1">Regions</div>
-              <div className="text-2xl font-bold font-mono text-miyu-text">{tournament.regions.length}</div>
+              <div className="text-xs text-miyu-text-muted mb-1">Leaderboards</div>
+              <div className="text-2xl font-bold font-mono text-miyu-text">{leaderboardRounds.length}</div>
             </div>
             <div className="bg-miyu-surface border border-miyu-border rounded-xl p-4">
-              <div className="text-xs text-miyu-text-muted mb-1">Platforms</div>
-              <div className="text-2xl font-bold font-mono text-miyu-text">{tournament.platforms.length || "All"}</div>
+              <div className="text-xs text-miyu-text-muted mb-1">Premio top</div>
+              <div className="text-2xl font-bold font-mono text-miyu-text">{topPrize ? formatPrize(topPrize.quantity, topPrize.value) : "N/D"}</div>
             </div>
             <div className="bg-miyu-surface border border-miyu-border rounded-xl p-4">
-              <div className="text-xs text-miyu-text-muted mb-1">Status</div>
+              <div className="text-xs text-miyu-text-muted mb-1">Estado</div>
               <div className="text-2xl font-bold font-mono text-miyu-text capitalize">{status}</div>
+            </div>
+          </div>
+
+          <div className="grid gap-4 lg:grid-cols-2">
+            <div className="bg-miyu-surface border border-miyu-border rounded-xl p-5">
+              <h3 className="text-sm font-bold text-miyu-text mb-4 font-mono">DATOS CLAVE</h3>
+              <div className="space-y-3 text-sm">
+                <div className="flex justify-between gap-4 border-b border-miyu-border pb-2">
+                  <span className="text-miyu-text-muted">Inicio</span>
+                  <span className="text-right font-mono text-miyu-text">{firstRound ? formatDate(firstRound.beginTime) : "N/D"}</span>
+                </div>
+                <div className="flex justify-between gap-4 border-b border-miyu-border pb-2">
+                  <span className="text-miyu-text-muted">Cierre</span>
+                  <span className="text-right font-mono text-miyu-text">{lastRound ? formatDate(lastRound.endTime) : "N/D"}</span>
+                </div>
+                <div className="flex justify-between gap-4 border-b border-miyu-border pb-2">
+                  <span className="text-miyu-text-muted">Regiones</span>
+                  <span className="text-right font-mono text-miyu-text">{tournament.regions.join(", ") || "N/D"}</span>
+                </div>
+                <div className="flex justify-between gap-4">
+                  <span className="text-miyu-text-muted">Plataformas</span>
+                  <span className="text-right font-mono text-miyu-text">{tournament.platforms.join(", ") || "Todas"}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-miyu-surface border border-miyu-border rounded-xl p-5">
+              <h3 className="text-sm font-bold text-miyu-text mb-4 font-mono">PUNTUACION</h3>
+              {scoringRules.length > 0 ? (
+                <div className="space-y-2">
+                  {scoringRules.slice(0, 5).map((rule) => (
+                    <div key={rule.trackedStat} className="rounded-lg border border-miyu-border bg-miyu-bg/50 px-3 py-2 text-sm text-miyu-text">
+                      {formatScoringRule(rule)}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-miyu-text-muted">Este torneo no publica reglas de puntuacion en la API.</p>
+              )}
             </div>
           </div>
 
           {/* Rounds */}
           <div className="bg-miyu-surface border border-miyu-border rounded-xl p-6">
-            <h3 className="text-sm font-bold text-miyu-text mb-4 font-mono">ROUNDS</h3>
+            <h3 className="text-sm font-bold text-miyu-text mb-4 font-mono">RONDAS</h3>
             <div className="space-y-2">
               {tournament.eventWindows?.map((w) => {
                 const isPast = new Date(w.endTime) < new Date();
@@ -557,7 +768,7 @@ export default function TournamentDetailPage() {
                       <span className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${
                         isLive ? "bg-red-500 text-white" :
                         isPast ? "bg-miyu-text-muted/20 text-miyu-text-muted" :
-                        "bg-[#204E46] text-white"
+                        "bg-miyu-btn text-miyu-text border border-miyu-text"
                       }`}>
                         {w.round}
                       </span>
@@ -568,14 +779,14 @@ export default function TournamentDetailPage() {
                     </div>
                     <div className="flex items-center gap-3">
                       {isLive && <StatusBadge status="live" />}
-                      {isPast && <span className="text-xs text-miyu-text-muted">Completed</span>}
-                      {!isLive && !isPast && <span className="text-xs text-[#204E46]">{formatRelativeTime(w.beginTime)}</span>}
+                      {isPast && <span className="text-xs text-miyu-text-muted">Finalizada</span>}
+                      {!isLive && !isPast && <span className="text-xs text-miyu-text">{formatRelativeTime(w.beginTime)}</span>}
                       {hasLeaderboard && (
                         <button
                           onClick={() => { setSelectedRound(w); setActiveTab("leaderboards"); }}
-                          className="text-xs text-[#204E46] hover:underline font-mono"
+                          className="rounded-lg border border-miyu-text bg-miyu-btn px-3 py-1.5 text-xs font-bold text-miyu-text hover:bg-miyu-btn-hover"
                         >
-                          View Leaderboard →
+                          Ver leaderboard
                         </button>
                       )}
                     </div>
@@ -605,8 +816,8 @@ export default function TournamentDetailPage() {
                   onClick={() => setSelectedRound(w)}
                   className={`px-4 py-2 text-sm rounded-lg border transition-colors ${
                     isSelected
-                      ? "bg-[#204E46] text-white border-[#204E46]"
-                      : "bg-miyu-surface text-miyu-text-muted border-miyu-border hover:border-[#204E46]/30"
+                      ? "bg-miyu-btn text-miyu-text border-miyu-text"
+                      : "bg-miyu-btn text-miyu-text border-miyu-border hover:bg-miyu-btn-hover"
                   }`}
                 >
                   {roundName}
@@ -622,55 +833,61 @@ export default function TournamentDetailPage() {
               roundName={tournament.displayData?.roundNames?.[selectedRound.round - 1] || `Round ${selectedRound.round}`}
             />
           ) : selectedRound ? (
-            <div className="text-center py-12 text-miyu-text-muted text-sm">No leaderboard available for this round</div>
+            <div className="text-center py-12 text-miyu-text-muted text-sm">No hay leaderboard para esta ronda</div>
           ) : (
-            <div className="text-center py-12 text-miyu-text-muted text-sm">Select a round to view leaderboard</div>
+            <div className="text-center py-12 text-miyu-text-muted text-sm">Selecciona una ronda para ver el leaderboard</div>
           )}
         </div>
       )}
 
-      {activeTab === "team" && (
-        <div className="bg-miyu-surface border border-miyu-border rounded-xl p-8 text-center">
-          <div className="text-miyu-text-muted text-sm">Team Stats - Coming soon</div>
-        </div>
-      )}
-
-      {activeTab === "player" && (
-        <div className="bg-miyu-surface border border-miyu-border rounded-xl p-8 text-center">
-          <div className="text-miyu-text-muted text-sm">Player Stats - Coming soon</div>
-        </div>
-      )}
-
-      {activeTab === "event" && (
-        <div className="bg-miyu-surface border border-miyu-border rounded-xl p-8 text-center">
-          <div className="text-miyu-text-muted text-sm">Event Stats - Coming soon</div>
-        </div>
-      )}
-
       {activeTab === "timeline" && (
-        <div className="bg-miyu-surface border border-miyu-border rounded-xl p-6">
-          <h3 className="text-sm font-bold text-miyu-text mb-4 font-mono">TIMELINE</h3>
-          <div className="space-y-4">
-            {tournament.eventWindows?.sort((a, b) => new Date(a.beginTime).getTime() - new Date(b.beginTime).getTime()).map((w, i) => {
-              const isPast = new Date(w.endTime) < new Date();
-              const isLive = new Date(w.beginTime) <= new Date() && new Date(w.endTime) >= new Date();
-              const roundName = tournament.displayData?.roundNames?.[w.round - 1] || `Round ${w.round}`;
+        <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
+          <div className="bg-miyu-surface border border-miyu-border rounded-xl p-6">
+            <h3 className="text-sm font-bold text-miyu-text mb-4 font-mono">CALENDARIO</h3>
+            <div className="space-y-4">
+              {tournament.eventWindows?.sort((a, b) => new Date(a.beginTime).getTime() - new Date(b.beginTime).getTime()).map((w, i) => {
+                const isPast = new Date(w.endTime) < new Date();
+                const isLive = new Date(w.beginTime) <= new Date() && new Date(w.endTime) >= new Date();
+                const roundName = tournament.displayData?.roundNames?.[w.round - 1] || `Round ${w.round}`;
 
-              return (
-                <div key={w.eventWindowId} className="flex gap-4">
-                  <div className="flex flex-col items-center">
-                    <div className={`w-3 h-3 rounded-full ${isLive ? "bg-red-500" : isPast ? "bg-miyu-text-muted" : "bg-[#204E46]"}`} />
-                    {i < (tournament.eventWindows?.length || 0) - 1 && <div className="w-px h-full bg-miyu-border mt-1" />}
+                return (
+                  <div key={w.eventWindowId} className="flex gap-4">
+                    <div className="flex flex-col items-center">
+                      <div className={`w-3 h-3 rounded-full ${isLive ? "bg-red-500" : isPast ? "bg-miyu-text-muted" : "bg-miyu-btn border border-miyu-text"}`} />
+                      {i < (tournament.eventWindows?.length || 0) - 1 && <div className="w-px h-full bg-miyu-border mt-1" />}
+                    </div>
+                    <div className="pb-4">
+                      <div className="text-sm text-miyu-text font-medium">{roundName}</div>
+                      <div className="text-xs text-miyu-text-muted">{formatDate(w.beginTime)} - {formatDate(w.endTime)}</div>
+                      {isLive && <span className="text-xs text-red-400">En vivo ahora</span>}
+                      {isPast && <span className="text-xs text-miyu-text-muted">Finalizada</span>}
+                      {!isLive && !isPast && <span className="text-xs text-miyu-text">{formatRelativeTime(w.beginTime)}</span>}
+                    </div>
                   </div>
-                  <div className="pb-4">
-                    <div className="text-sm text-miyu-text font-medium">{roundName}</div>
-                    <div className="text-xs text-miyu-text-muted">{formatDate(w.beginTime)}</div>
-                    {isLive && <span className="text-xs text-red-400">Live now</span>}
-                    {isPast && <span className="text-xs text-miyu-text-muted">Completed</span>}
-                  </div>
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="bg-miyu-surface border border-miyu-border rounded-xl p-6">
+            <h3 className="text-sm font-bold text-miyu-text mb-4 font-mono">PREMIOS</h3>
+            {prizeRows.length > 0 ? (
+              <div className="space-y-2">
+                {prizeRows.slice(0, 8).map((rank) => {
+                  const payout = rank.payouts?.[0];
+                  return (
+                    <div key={rank.threshold} className="flex items-center justify-between rounded-lg border border-miyu-border px-3 py-2 text-sm">
+                      <span className="font-mono text-miyu-text">Top {rank.threshold}</span>
+                      <span className="font-mono font-bold text-miyu-text">
+                        {payout ? formatPrize(payout.quantity, payout.value) : "N/D"}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="text-sm text-miyu-text-muted">Sin premios publicados en la API.</p>
+            )}
           </div>
         </div>
       )}

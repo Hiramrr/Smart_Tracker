@@ -1,18 +1,17 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
-
-const ASCII_ART = `▒▒▒▒         ▒▒▒▒
- ▒▒▒▒▒▒▒░░░░░░▒▒▒▒
-  ▒▒░░░▒▒▒░░▒▒▒░▒▒
-  ▒▒▓▒▓▒░░░░▒▒▓█▓▒
- ▒░▒▓▓▓▒▒▒░░░▒▒▓▓▒▒
- ░▒▒░░░░░░▒▒▒▒▒▒▒▒▒
- ░░▒▒▒░░░▒▓▓▓▓▓▓▒▒▒
- ░░░▒░░░░░▒▓▓█▓▒▒▒▒
-░░░░░░▒▒▒▒▒▓▓▓▓▓▓▓▒▒
-░░░░░░░▒▒▓▓▓▓▓▓▓▓▓▓
-░░░░░░▒▒▒▒▓▓▓▓▓▓▓`;
+import Link from "next/link";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import {
+  BarChart3,
+  Clock3,
+  Search,
+  ShoppingBag,
+  Star,
+  Target,
+  Trophy,
+  Users,
+} from "lucide-react";
 
 interface RankedData {
   success: boolean;
@@ -57,96 +56,10 @@ interface SearchHistory {
 type InputMethod = "keyboardmouse" | "gamepad" | "touch" | string;
 type GameMode = "p2" | "p10" | "p9" | string;
 const CANONICAL_GAME_MODES = ["solo", "duo", "trio", "squad", "ltm"] as const;
+const RANK_ICON_SPRITE = "/rank-icons/fortnite-ranked-symbols.png";
 
 function getErrorMessage(err: unknown) {
   return err instanceof Error ? err.message : "error desconocido";
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object";
-}
-
-function readStatValue(value: unknown): number | undefined {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value === "string") {
-    const parsed = Number(value.replace(/[%,$\s]/g, ""));
-    return Number.isFinite(parsed) ? parsed : undefined;
-  }
-  if (isRecord(value)) {
-    return readStatValue(value.value ?? value.displayValue ?? value.rank);
-  }
-  return undefined;
-}
-
-function assignStat(target: ModeStats, key: string, value: unknown) {
-  const parsed = readStatValue(value);
-  if (parsed === undefined) return;
-
-  switch (key.toLowerCase()) {
-    case "wins":
-    case "top1":
-    case "placetop1":
-      target.placetop1 = parsed;
-      break;
-    case "top3":
-    case "placetop3":
-      target.placetop3 = parsed;
-      break;
-    case "top5":
-    case "placetop5":
-      target.placetop5 = parsed;
-      break;
-    case "top6":
-    case "placetop6":
-      target.placetop6 = parsed;
-      break;
-    case "top10":
-    case "placetop10":
-      target.placetop10 = parsed;
-      break;
-    case "top12":
-    case "placetop12":
-      target.placetop12 = parsed;
-      break;
-    case "top25":
-    case "placetop25":
-      target.placetop25 = parsed;
-      break;
-    case "kills":
-      target.kills = parsed;
-      break;
-    case "matches":
-    case "matchesplayed":
-      target.matchesplayed = parsed;
-      break;
-    case "minutesplayed":
-    case "minutesplayedtotal":
-      target.minutesplayed = parsed;
-      break;
-    case "score":
-      target.score = parsed;
-      break;
-  }
-}
-
-function normalizeInputName(input: string) {
-  const normalized = input.toLowerCase().replace(/[-_\s]/g, "");
-  if (normalized === "keyboardmouse" || normalized === "keyboardandmouse") return "keyboardmouse";
-  if (normalized === "gamepad" || normalized === "controller") return "gamepad";
-  if (normalized === "touch") return "touch";
-  if (normalized === "all" || normalized === "overall") return "all";
-  return input;
-}
-
-function normalizeModeName(mode: string) {
-  const normalized = mode.toLowerCase().replace(/[-_\s]/g, "");
-  if (normalized === "solo" || normalized === "p9") return "solo";
-  if (normalized === "duo" || normalized === "duos" || normalized === "p2") return "duo";
-  if (normalized === "trio" || normalized === "trios") return "trio";
-  if (normalized === "squad" || normalized === "squads" || normalized === "p10") return "squad";
-  if (normalized === "ltm" || normalized === "other") return "ltm";
-  if (normalized === "overall" || normalized === "all") return "overall";
-  return mode;
 }
 
 function formatInputMethod(input: string) {
@@ -174,73 +87,13 @@ function formatGameModeTitle(mode: string) {
   return formatGameMode(mode).toUpperCase();
 }
 
-function parseTrackerStats(trackerData: unknown): StatsData {
-  const root = isRecord(trackerData) ? trackerData : {};
-  const data = isRecord(root.data) ? root.data : {};
-  const segments = data.segments || root.segments || root.stats || [];
-  const groupedStats: Record<string, Record<string, ModeStats>> = {};
-
-  for (const rawSegment of Array.isArray(segments) ? segments : []) {
-    if (!isRecord(rawSegment)) continue;
-    const segment = rawSegment;
-    const metadata = isRecord(rawSegment.metadata) ? rawSegment.metadata : {};
-    const segmentKey = String(metadata.key || metadata.name || segment.type || "overall");
-    const mode = normalizeModeName(String(metadata.mode || segmentKey));
-    const method = normalizeInputName(String(metadata.input || metadata.inputType || "all"));
-    const modeStats: ModeStats = {};
-
-    if (Array.isArray(segment.entries)) {
-      for (const entry of segment.entries) {
-        if (isRecord(entry)) assignStat(modeStats, String(entry.key), entry.value);
-      }
-    } else {
-      const stats = isRecord(segment.stats) ? segment.stats : {};
-      for (const [key, value] of Object.entries(stats)) assignStat(modeStats, key, value);
-    }
-
-    if (Object.keys(modeStats).length === 0) continue;
-    if (!groupedStats[method]) groupedStats[method] = {};
-    groupedStats[method][mode] = modeStats;
-  }
-
-  return {
-    success: true,
-    groupedStats,
-    seasonLevels: [],
-    source: "tracker",
-  };
-}
-
-function parseFortniteApiStats(apiData: unknown): StatsData {
-  const root = isRecord(apiData) ? apiData : {};
-  const data = isRecord(root.data) ? root.data : {};
-  const statsByInput = isRecord(data.stats) ? data.stats : isRecord(root.stats) ? root.stats : {};
-  const groupedStats: Record<string, Record<string, ModeStats>> = {};
-
-  for (const [input, modes] of Object.entries(statsByInput)) {
-    if (!isRecord(modes)) continue;
-    const method = normalizeInputName(input);
-    groupedStats[method] = {};
-
-    for (const [modeName, rawStats] of Object.entries(modes)) {
-      if (!isRecord(rawStats)) continue;
-      const modeStats: ModeStats = {};
-      for (const [key, value] of Object.entries(rawStats)) assignStat(modeStats, key, value);
-      if (Object.keys(modeStats).length > 0) {
-        groupedStats[method][normalizeModeName(modeName)] = modeStats;
-      }
-    }
-  }
-
-  return {
-    success: true,
-    groupedStats,
-    seasonLevels: isRecord(data.battlePass) ? [{ level: readStatValue(data.battlePass.level) || 0 }] : [],
-    source: "fortnite-api",
-  };
-}
-
-export default function OsirionDashboard() {
+export default function OsirionDashboard({
+  initialPlayer,
+  initialDisplayName,
+}: {
+  initialPlayer?: string;
+  initialDisplayName?: string;
+}) {
   const [searchInput, setSearchInput] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
   const [loadingMsg, setLoadingMsg] = useState("");
@@ -265,6 +118,7 @@ export default function OsirionDashboard() {
   const [selectedInputMethod, setSelectedInputMethod] = useState<InputMethod | "all">("all");
   const [selectedGameMode, setSelectedGameMode] = useState<GameMode | "all">("all");
   const [activeTab, setActiveTab] = useState<"overview" | "modes" | "ranked">("overview");
+  const initialSearchDone = useRef(false);
 
   const fetchStats = useCallback(async (accountId: string, displayName: string, timeframe: "season" | "lifetime") => {
     setLoadingMsg("obteniendo estadisticas...");
@@ -273,45 +127,13 @@ export default function OsirionDashboard() {
     setRankedData(null);
 
     try {
-      if (timeframe === "lifetime") {
-        let parsedStats: StatsData | null = null;
+      const statsRes = await fetch(`/api/osirion?action=stats&accountId=${encodeURIComponent(accountId)}&timeframe=${timeframe}`);
+      if (!statsRes.ok) throw new Error(`error en stats ${timeframe}: ${statsRes.status}`);
+      const statsJson: StatsData = await statsRes.json();
+      if (!statsJson.groupedStats) throw new Error("osirion no devolvio estadisticas.");
+      setStatsData({ ...statsJson, success: true, source: "osirion" });
 
-        const trackerRes = await fetch(`/api/osirion?action=tracker-stats&displayName=${encodeURIComponent(displayName)}`);
-        if (trackerRes.ok) {
-          const trackerJson = await trackerRes.json();
-          if (trackerJson.success && trackerJson.data) {
-            parsedStats = parseTrackerStats(trackerJson.data);
-          }
-        }
-
-        if (!parsedStats || Object.keys(parsedStats.groupedStats || {}).length === 0) {
-          const fortniteApiRes = await fetch(`/api/osirion?action=fortnite-api-stats&accountId=${encodeURIComponent(accountId)}&displayName=${encodeURIComponent(displayName)}&timeframe=lifetime`);
-          if (fortniteApiRes.ok) {
-            const fortniteApiJson = await fortniteApiRes.json();
-            if (fortniteApiJson.success && fortniteApiJson.data) {
-              parsedStats = parseFortniteApiStats(fortniteApiJson.data);
-            }
-          }
-        }
-
-        if (!parsedStats || Object.keys(parsedStats.groupedStats || {}).length === 0) {
-          const statsRes = await fetch(`/api/osirion?action=stats&accountId=${accountId}&timeframe=lifetime`);
-          if (!statsRes.ok) throw new Error(`error en stats lifetime: ${statsRes.status}`);
-          const statsJson: StatsData = await statsRes.json();
-          if (!statsJson.success) throw new Error("api devolvio error.");
-          parsedStats = { ...statsJson, source: "osirion" };
-        }
-
-        setStatsData(parsedStats);
-      } else {
-        const statsRes = await fetch(`/api/osirion?action=stats&accountId=${accountId}&timeframe=season`);
-        if (!statsRes.ok) throw new Error(`error en stats: ${statsRes.status}`);
-        const statsJson: StatsData = await statsRes.json();
-        if (!statsJson.success) throw new Error("api devolvio error.");
-        setStatsData({ ...statsJson, source: "osirion" });
-      }
-
-      const rankedRes = await fetch(`/api/osirion?action=ranked-current&accountId=${accountId}`);
+      const rankedRes = await fetch(`/api/osirion?action=ranked-current&accountId=${encodeURIComponent(accountId)}`);
       let rankedJson: RankedData = { success: false, rank: null };
       if (rankedRes.ok) {
         const rankedParsed = await rankedRes.json();
@@ -327,7 +149,7 @@ export default function OsirionDashboard() {
     }
   }, []);
 
-  const handleSearch = async (e: React.FormEvent, overrideQuery?: string) => {
+  const handleSearch = async (e: React.FormEvent, overrideQuery?: string, overrideDisplayName?: string) => {
     e.preventDefault();
     const query = (overrideQuery || searchInput).trim();
     if (!query) return;
@@ -341,7 +163,7 @@ export default function OsirionDashboard() {
 
     try {
       let accountId = query;
-      let displayName = query;
+      let displayName = overrideDisplayName || query;
 
       if (query.length !== 32 || !/^[0-9a-f]+$/i.test(query)) {
         setLoadingMsg("resolviendo usuario...");
@@ -353,7 +175,7 @@ export default function OsirionDashboard() {
         const lookupJson = await lookupRes.json();
         if (!lookupJson.success || !lookupJson.accountId) throw new Error(`no se resolvio el id para "${query}".`);
         accountId = lookupJson.accountId;
-        displayName = lookupJson.displayName || query;
+        displayName = lookupJson.displayName || overrideDisplayName || query;
       }
 
       setCurrentAccountId(accountId);
@@ -386,6 +208,17 @@ export default function OsirionDashboard() {
     setSearchInput(displayName);
     void handleSearch({ preventDefault: () => undefined } as React.FormEvent, displayName);
   };
+
+  useEffect(() => {
+    if (!initialPlayer || initialSearchDone.current) return;
+    initialSearchDone.current = true;
+    setSearchInput(initialDisplayName || initialPlayer);
+    const timeout = window.setTimeout(() => {
+      void handleSearch({ preventDefault: () => undefined } as React.FormEvent, initialPlayer, initialDisplayName);
+    }, 0);
+    return () => window.clearTimeout(timeout);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialPlayer, initialDisplayName]);
 
   const setTimeframe = async (tf: "season" | "lifetime") => {
     if (currentTimeframe === tf) return;
@@ -539,277 +372,193 @@ export default function OsirionDashboard() {
       : "osirion";
 
   return (
-    <div className="w-full max-w-5xl flex flex-col min-h-[calc(100vh-4rem)] mx-auto px-4 py-8">
-      <div className="flex justify-between items-start">
-        <div className="text-sm font-bold text-miyu-text-muted">[fortnite stats]</div>
-        {currentDisplayName && (
-          <div className="text-xs text-miyu-text-muted font-mono">
-            jugador: <span className="text-miyu-text font-bold">{currentDisplayName}</span>
-          </div>
-        )}
-      </div>
+    <div className="min-h-screen">
+      <header className="sticky top-0 z-20 border-b border-miyu-border bg-miyu-bg/90 backdrop-blur">
+        <div className="flex h-[74px] items-center justify-between gap-4 px-5 lg:px-8">
+          <LinklessMobileNav />
+          <form onSubmit={(e) => handleSearch(e)} className="relative w-full max-w-[390px]">
+            <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-miyu-text" />
+            <input
+              id="searchInput"
+              type="text"
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              onFocus={() => searchHistory.length > 0 && setShowHistory(true)}
+              placeholder="Buscar jugador..."
+              className="h-11 w-full rounded-md border border-miyu-border bg-white/35 px-11 pr-12 text-sm text-miyu-text outline-none transition-colors placeholder:text-miyu-text-muted focus:border-miyu-text"
+              autoComplete="off"
+              spellCheck={false}
+            />
+            <button
+              type="submit"
+              className="absolute right-1.5 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded border border-miyu-border bg-miyu-btn text-miyu-text transition-colors hover:bg-miyu-btn-hover"
+              aria-label="Buscar jugador"
+            >
+              <Search className="h-4 w-4" />
+            </button>
+            {showHistory && searchHistory.length > 0 && (
+              <div className="absolute left-0 right-0 top-full mt-2 overflow-hidden rounded-md border border-miyu-border bg-miyu-surface shadow-lg">
+                <div className="flex items-center justify-between border-b border-miyu-border px-3 py-2">
+                  <span className="font-mono text-xs text-miyu-text-muted">busquedas recientes</span>
+                  <button type="button" onClick={clearHistory} className="rounded bg-miyu-btn px-2 py-1 font-mono text-xs text-miyu-text hover:bg-miyu-btn-hover">
+                    limpiar
+                  </button>
+                </div>
+                {searchHistory.map((h) => (
+                  <button
+                    type="button"
+                    key={h.accountId}
+                    onClick={() => searchFromHistory(h.displayName)}
+                    className="flex w-full items-center justify-between bg-miyu-btn px-3 py-2 text-left hover:bg-miyu-btn-hover"
+                  >
+                    <span className="font-mono text-sm text-miyu-text">{h.displayName}</span>
+                    <span className="text-xs text-miyu-text-muted">{new Date(h.timestamp).toLocaleDateString("es-MX")}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </form>
 
-      <div className="mt-8 mb-8">
-        <pre className="whitespace-pre text-sm text-miyu-text-muted leading-tight font-mono w-fit text-left mx-auto">
-          {ASCII_ART}
-        </pre>
-      </div>
-
-      <div className="relative">
-        <form onSubmit={(e) => handleSearch(e)} className="border-2 border-miyu-text p-3 flex items-center gap-3 rounded-lg">
-          <span className="text-miyu-text font-bold text-lg">$</span>
-          <input
-            id="searchInput"
-            type="text"
-            value={searchInput}
-            onChange={(e) => setSearchInput(e.target.value)}
-            onFocus={() => searchHistory.length > 0 && setShowHistory(true)}
-            placeholder="buscar jugador epic... (/)"
-            className="w-full bg-transparent text-miyu-text placeholder-miyu-text-muted/60 font-mono text-sm outline-none"
-            autoComplete="off"
-            spellCheck={false}
-          />
-          {isLoading && (
-            <div className="w-4 h-4 border-2 border-miyu-text-muted border-t-miyu-text rounded-full animate-spin" />
-          )}
-        </form>
-
-        {showHistory && searchHistory.length > 0 && (
-          <div className="absolute top-full left-0 right-0 mt-1 bg-miyu-surface border-2 border-miyu-border rounded-lg shadow-lg z-10 overflow-hidden">
-            <div className="flex justify-between items-center px-3 py-2 border-b border-miyu-border">
-              <span className="text-xs text-miyu-text-muted font-mono">busquedas recientes</span>
-              <button
-                onClick={clearHistory}
-                className="text-xs text-miyu-text-muted hover:text-red-500 transition-colors"
-              >
-                [limpiar]
-              </button>
+          {currentDisplayName && (
+            <div className="hidden items-center gap-2 text-sm font-medium text-miyu-text sm:flex">
+              <span className="h-2 w-2 rounded-full bg-black dark:bg-miyu-accent" />
+              <span>{currentDisplayName}</span>
             </div>
-            {searchHistory.map((h) => (
-              <button
-                key={h.accountId}
-                onClick={() => {
-                  searchFromHistory(h.displayName);
-                }}
-                className="w-full text-left px-3 py-2 hover:bg-miyu-accent-light transition-colors flex justify-between items-center"
-              >
-                <span className="text-sm font-mono text-miyu-text">{h.displayName}</span>
-                <span className="text-xs text-miyu-text-muted">
-                  {new Date(h.timestamp).toLocaleDateString()}
-                </span>
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {errorMsg && (
-        <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-lg">
-          <div className="text-red-600 text-xs font-mono">{errorMsg}</div>
+          )}
         </div>
-      )}
-      {loadingMsg && (
-        <div className="text-miyu-text-muted text-xs mt-3 animate-pulse font-mono">{loadingMsg}</div>
-      )}
+      </header>
 
-      {filteredStats && (
-        <section className="flex-1 flex flex-col mt-8">
-          <div className="flex flex-wrap justify-between items-center gap-4 mb-6">
-            <div className="flex flex-wrap gap-2">
-              <button
-                onClick={() => setTimeframe("season")}
-                className={`border-2 border-miyu-text px-3 py-1.5 cursor-pointer transition-colors text-xs rounded-md ${
-                  currentTimeframe === "season"
-                    ? "bg-miyu-text text-miyu-bg font-bold"
-                    : "hover:bg-miyu-surface"
-                }`}
-              >
-                temp actual
-              </button>
-              <button
-                onClick={() => setTimeframe("lifetime")}
-                className={`border-2 border-miyu-text px-3 py-1.5 cursor-pointer transition-colors text-xs rounded-md ${
-                  currentTimeframe === "lifetime"
-                    ? "bg-miyu-text text-miyu-bg font-bold"
-                    : "hover:bg-miyu-surface"
-                }`}
-              >
-                todas las temp
-              </button>
-            </div>
-
-            <div className="flex items-center gap-4">
-              {statsData?.seasonLevels && statsData.seasonLevels.length > 0 && (
-                <span className="text-miyu-text-muted font-mono text-xs">
-                  [nivel: {statsData.seasonLevels[0].level}]
-                </span>
-              )}
-              <span className="text-miyu-text-muted font-mono text-xs">
-                [{currentTimeframe === "season" ? "temporada" : "lifetime"} · {sourceLabel}]
-              </span>
+      <section className="px-5 py-6 lg:px-8">
+        <div className="mx-auto max-w-[1500px]">
+          <div className="mb-5 rounded-md border border-miyu-border bg-white/25 px-5 py-4">
+            <div className="flex items-center gap-4 font-mono text-sm">
+              <span>$</span>
+              <span>{currentDisplayName || "Sin jugador seleccionado"}</span>
             </div>
           </div>
 
-          <div className="flex gap-2 mb-6 border-b border-miyu-border">
-            {(["overview", "modes", "ranked"] as const).map((tab) => (
-              <button
-                key={tab}
-                onClick={() => setActiveTab(tab)}
-                className={`px-4 py-2 text-xs font-mono transition-colors border-b-2 -mb-px ${
-                  activeTab === tab
-                    ? "border-miyu-text text-miyu-text font-bold"
-                    : "border-transparent text-miyu-text-muted hover:text-miyu-text"
-                }`}
-              >
-                {tab === "overview" ? "general" : tab === "modes" ? "modos" : "ranked"}
-              </button>
-            ))}
-          </div>
-
-          {activeTab === "overview" && (
-            <>
-              {(availableInputMethods.length > 1 || availableGameModes.length > 1) && (
-                <div className="flex flex-wrap gap-4 mb-6 p-4 bg-miyu-surface border border-miyu-border rounded-lg">
-                  {availableInputMethods.length > 1 && (
-                    <div className="flex flex-col gap-1">
-                      <label className="text-xs text-miyu-text-muted font-mono">metodo de entrada</label>
-                      <div className="flex gap-1">
-                        <button
-                          onClick={() => setSelectedInputMethod("all")}
-                          className={`px-2 py-1 text-xs font-mono border rounded ${
-                            selectedInputMethod === "all"
-                              ? "bg-miyu-text text-miyu-bg"
-                              : "border-miyu-border hover:bg-miyu-accent-light"
-                          }`}
-                        >
-                          todos
-                        </button>
-                        {availableInputMethods.map((m) => (
-                          <button
-                            key={m}
-                            onClick={() => setSelectedInputMethod(m)}
-                            className={`px-2 py-1 text-xs font-mono border rounded ${
-                              selectedInputMethod === m
-                                ? "bg-miyu-text text-miyu-bg"
-                                : "border-miyu-border hover:bg-miyu-accent-light"
-                            }`}
-                          >
-                            {formatInputMethod(m)}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  {availableGameModes.length > 1 && (
-                    <div className="flex flex-col gap-1">
-                      <label className="text-xs text-miyu-text-muted font-mono">modo de juego</label>
-                      <div className="flex gap-1">
-                        <button
-                          onClick={() => setSelectedGameMode("all")}
-                          className={`px-2 py-1 text-xs font-mono border rounded ${
-                            selectedGameMode === "all"
-                              ? "bg-miyu-text text-miyu-bg"
-                              : "border-miyu-border hover:bg-miyu-accent-light"
-                          }`}
-                        >
-                          todos
-                        </button>
-                        {availableGameModes.map((m) => (
-                          <button
-                            key={m}
-                            onClick={() => setSelectedGameMode(m)}
-                            className={`px-2 py-1 text-xs font-mono border rounded ${
-                              selectedGameMode === m
-                                ? "bg-miyu-text text-miyu-bg"
-                                : "border-miyu-border hover:bg-miyu-accent-light"
-                            }`}
-                          >
-                            {formatGameMode(m)}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 mb-8">
-                <StatCard label="rango actual" value={filteredStats.rankLabel} highlight />
-                <StatCard label="k/d ratio" value={filteredStats.kdRatio} />
-                <StatCard label="win rate" value={filteredStats.winRate} />
-                <StatCard label="victorias" value={filteredStats.totalWins} />
-                <StatCard label="partidas" value={filteredStats.totalMatches} />
-              </div>
-
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
-                <MiniStat label="kills promedio" value={filteredStats.avgKills} />
-                <MiniStat label="score promedio" value={filteredStats.avgScore} />
-                <MiniStat label="tiempo total" value={`${filteredStats.hours}h`} />
-                <MiniStat label="score total" value={filteredStats.totalScore.toLocaleString()} />
-              </div>
-
-              <div className="border-t border-dashed border-miyu-border mb-6" />
-
-              <div className="flex justify-between text-sm mb-4">
-                <span className="text-miyu-text-muted font-mono text-xs">metricas detalladas</span>
-                <button
-                  onClick={() => setShowRawJson((v) => !v)}
-                  className="cursor-pointer hover:bg-miyu-text hover:text-miyu-bg transition-colors border border-transparent hover:border-miyu-text px-2 py-0.5 rounded text-xs font-mono"
-                >
-                  [ver .json]
-                </button>
-              </div>
-
-              <div className="flex flex-col">
-                <DetailBox
-                  title="Eliminaciones"
-                  subtitle={`${filteredStats.avgKills} avg por partida`}
-                  rightText={`${filteredStats.totalKills} totales`}
-                  icon="swords"
-                />
-                <DetailBox
-                  title="Tiempo Jugado"
-                  subtitle={`${filteredStats.avgMinutes} min avg por partida`}
-                  rightText={`${filteredStats.hours} horas`}
-                  icon="clock"
-                />
-                <DetailBox
-                  title="Top 3"
-                  subtitle={`${filteredStats.totalMatches > 0 ? ((filteredStats.top3 / filteredStats.totalMatches) * 100).toFixed(1) : 0}% de las partidas`}
-                  rightText={`${filteredStats.top3}`}
-                  icon="top3"
-                />
-                <DetailBox
-                  title="Top 5"
-                  subtitle={`${filteredStats.totalMatches > 0 ? ((filteredStats.top5 / filteredStats.totalMatches) * 100).toFixed(1) : 0}% de las partidas`}
-                  rightText={`${filteredStats.top5}`}
-                  icon="top5"
-                />
-                <DetailBox
-                  title="Top 10"
-                  subtitle={`${filteredStats.totalMatches > 0 ? ((filteredStats.top10 / filteredStats.totalMatches) * 100).toFixed(1) : 0}% de las partidas`}
-                  rightText={`${filteredStats.top10}`}
-                  icon="top10"
-                />
-                <DetailBox
-                  title="Puntuacion"
-                  subtitle={`+${filteredStats.avgScore} xp avg`}
-                  rightText={`${filteredStats.totalScore.toLocaleString()} pts`}
-                  icon="star"
-                />
-              </div>
-
-              {showRawJson && (
-                <div className="mt-6">
-                  <div className="border-2 border-miyu-text p-4 bg-miyu-surface overflow-x-auto rounded-lg max-h-96 overflow-y-auto">
-                    <pre className="text-xs text-miyu-text-muted font-mono">
-                      {JSON.stringify({ stats: statsData, ranked: rankedData }, null, 2)}
-                    </pre>
-                  </div>
-                </div>
-              )}
-            </>
+          {errorMsg && (
+            <div className="mb-4 rounded-md border border-red-200 bg-red-50 px-4 py-3 font-mono text-xs text-red-600">
+              {errorMsg}
+            </div>
           )}
+          {loadingMsg && (
+            <div className="mb-4 font-mono text-xs text-miyu-text-muted animate-pulse">{loadingMsg}</div>
+          )}
+
+          {!filteredStats && !isLoading && (
+            <div className="rounded-md border border-miyu-border bg-white/20 p-5">
+              <h1 className="text-base font-bold tracking-tight">Busca un jugador</h1>
+              <p className="mt-1 text-sm text-miyu-text-muted">
+                Escribe un Epic ID o accountId para consultar estadisticas desde Osirion.
+              </p>
+            </div>
+          )}
+
+          {filteredStats && (
+            <section>
+              <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
+                <div className="flex flex-wrap gap-3">
+                  <SegmentButton active={currentTimeframe === "season"} onClick={() => setTimeframe("season")}>
+                    TEMP ACTUAL
+                  </SegmentButton>
+                  <SegmentButton active={currentTimeframe === "lifetime"} onClick={() => setTimeframe("lifetime")}>
+                    TODAS LAS TEMP
+                  </SegmentButton>
+                </div>
+
+                <div className="font-mono text-xs text-miyu-text-muted">
+                  {statsData?.seasonLevels?.[0]?.level ? `[ nivel: ${statsData.seasonLevels[0].level} ] ` : ""}
+                  [ {currentTimeframe === "season" ? "temporada actual" : "todas las temporadas"} ] [ {sourceLabel} ]
+                </div>
+              </div>
+
+              <div className="mb-6 flex gap-8 border-b border-miyu-border">
+                {(["overview", "modes", "ranked"] as const).map((tab) => (
+                  <button
+                    key={tab}
+                    onClick={() => setActiveTab(tab)}
+                    className={`rounded-t-md border-b-2 bg-miyu-btn px-4 py-3 text-xs font-bold uppercase tracking-wide transition-colors hover:bg-miyu-btn-hover ${
+                      activeTab === tab
+                        ? "border-miyu-text text-miyu-text"
+                        : "border-transparent text-miyu-text-muted hover:text-miyu-text"
+                    }`}
+                  >
+                    {tab === "overview" ? "General" : tab === "modes" ? "Modos" : "Ranked"}
+                  </button>
+                ))}
+              </div>
+
+              {activeTab === "overview" && (
+                <>
+                  <div className="mb-5 grid rounded-md border border-miyu-border bg-white/20 lg:grid-cols-2">
+                    <FilterGroup title="Metodo de entrada">
+                      <SegmentButton active={selectedInputMethod === "all"} small onClick={() => setSelectedInputMethod("all")}>TODOS</SegmentButton>
+                      {availableInputMethods.map((m) => (
+                        <SegmentButton key={m} active={selectedInputMethod === m} small onClick={() => setSelectedInputMethod(m)}>
+                          {formatInputMethod(m).toUpperCase()}
+                        </SegmentButton>
+                      ))}
+                    </FilterGroup>
+                    <FilterGroup title="Modo de juego">
+                      <SegmentButton active={selectedGameMode === "all"} small onClick={() => setSelectedGameMode("all")}>TODOS</SegmentButton>
+                      {availableGameModes.map((m) => (
+                        <SegmentButton key={m} active={selectedGameMode === m} small onClick={() => setSelectedGameMode(m)}>
+                          {formatGameMode(m).toUpperCase()}
+                        </SegmentButton>
+                      ))}
+                    </FilterGroup>
+                  </div>
+
+                  <div className="mb-5 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+                    <StatCard
+                      label="Rango actual"
+                      value={filteredStats.rankLabel.toUpperCase()}
+                      icon={<RankIcon rank={filteredStats.rankLabel} size={46} />}
+                      highlight
+                    />
+                    <StatCard label="K/D Ratio" value={filteredStats.kdRatio} />
+                    <StatCard label="Win Rate" value={filteredStats.winRate} />
+                    <StatCard label="Victorias" value={filteredStats.totalWins} />
+                    <StatCard label="Partidas" value={filteredStats.totalMatches} />
+                  </div>
+
+                  <div className="mb-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                    <MiniStat label="Kills promedio" value={filteredStats.avgKills} />
+                    <MiniStat label="Score promedio" value={filteredStats.avgScore} />
+                    <MiniStat label="Tiempo total" value={`${filteredStats.hours}h`} />
+                    <MiniStat label="Score total" value={filteredStats.totalScore.toLocaleString("es-MX")} />
+                  </div>
+
+                  <div className="mb-3 flex items-center justify-between">
+                    <h2 className="font-mono text-sm font-bold uppercase tracking-wide">Metricas detalladas</h2>
+                    <button onClick={() => setShowRawJson((v) => !v)} className="rounded bg-miyu-btn px-2 py-1 font-mono text-xs text-miyu-text hover:bg-miyu-btn-hover">
+                      [ver .json]
+                    </button>
+                  </div>
+
+                  <div className="grid gap-4 xl:grid-cols-2">
+                    <DetailPanel>
+                      <DetailBox title="Eliminaciones" subtitle={`${filteredStats.avgKills} avg por partida`} rightText={`${filteredStats.totalKills.toLocaleString("es-MX")} totales`} icon="target" />
+                      <DetailBox title="Tiempo jugado" subtitle={`${filteredStats.avgMinutes} min avg por partida`} rightText={`${filteredStats.hours}h totales`} icon="clock" />
+                      <DetailBox title="Top 3" subtitle={`${filteredStats.totalMatches > 0 ? ((filteredStats.top3 / filteredStats.totalMatches) * 100).toFixed(1) : 0}% de las partidas`} rightText={`${filteredStats.top3} totales`} icon="top3" />
+                    </DetailPanel>
+                    <DetailPanel>
+                      <DetailBox title="Top 5" subtitle={`${filteredStats.totalMatches > 0 ? ((filteredStats.top5 / filteredStats.totalMatches) * 100).toFixed(1) : 0}% de las partidas`} rightText={`${filteredStats.top5} totales`} icon="top5" />
+                      <DetailBox title="Top 10" subtitle={`${filteredStats.totalMatches > 0 ? ((filteredStats.top10 / filteredStats.totalMatches) * 100).toFixed(1) : 0}% de las partidas`} rightText={`${filteredStats.top10} totales`} icon="top10" />
+                      <DetailBox title="Puntuacion" subtitle={`+${filteredStats.avgScore} xp avg`} rightText={`${filteredStats.totalScore.toLocaleString("es-MX")} pts totales`} icon="star" />
+                    </DetailPanel>
+                  </div>
+
+                  {showRawJson && (
+                    <div className="mt-6 max-h-96 overflow-auto rounded-md border border-miyu-border bg-white/40 p-4">
+                      <pre className="font-mono text-xs text-miyu-text-muted">
+                        {JSON.stringify({ stats: statsData, ranked: rankedData }, null, 2)}
+                      </pre>
+                    </div>
+                  )}
+                </>
+              )}
 
           {activeTab === "modes" && (
             <div className="space-y-4">
@@ -890,8 +639,11 @@ export default function OsirionDashboard() {
                 <>
                   <div className="border-2 border-miyu-text rounded-lg p-6 bg-miyu-surface">
                     <div className="text-xs text-miyu-text-muted font-mono mb-2">rango actual</div>
-                    <div className="text-3xl font-bold text-miyu-text font-mono mb-2">
-                      {formatCurrentRank(rankedData.rank)}
+                    <div className="mb-2 flex items-center gap-4">
+                      <RankIcon rank={formatCurrentRank(rankedData.rank)} size={58} />
+                      <div className="text-3xl font-bold text-miyu-text font-mono">
+                        {formatCurrentRank(rankedData.rank)}
+                      </div>
                     </div>
                     <div className="text-xs text-miyu-text-muted font-mono">
                       {rankedData.rank.rankingType}
@@ -941,29 +693,145 @@ export default function OsirionDashboard() {
           <div className="flex-1" />
         </section>
       )}
+        </div>
+      </section>
 
-      <div className="flex justify-between text-xs text-miyu-text-muted mt-12 pt-4 border-t border-miyu-border">
-        <span>[fortnite]</span>
-        <span>[⚙]</span>
-      </div>
     </div>
   );
 }
 
-function StatCard({ label, value, highlight }: { label: string; value: string | number; highlight?: boolean }) {
+function LinklessMobileNav() {
+  const items = [
+    { href: "/dashboard/player", label: "Personas", icon: Users },
+    { href: "/dashboard/compare", label: "Comparar", icon: BarChart3 },
+    { href: "/dashboard/tournaments", label: "Torneos", icon: Trophy },
+    { href: "/dashboard/shop", label: "Tienda", icon: ShoppingBag },
+  ];
+
   return (
-    <div className={`space-y-2 p-4 rounded-lg border ${highlight ? "border-miyu-text bg-miyu-surface" : "border-miyu-border"}`}>
-      <div className={`font-bold text-xl leading-none font-mono ${highlight ? "text-miyu-text" : ""}`}>{value}</div>
-      <div className="text-xs text-miyu-text-muted lowercase">{label}</div>
+    <nav className="flex items-center gap-1 lg:hidden" aria-label="Dashboard movil">
+      {items.map((item) => {
+        const Icon = item.icon;
+        return (
+          <Link
+            key={item.href}
+            href={item.href}
+            className="flex h-10 w-10 items-center justify-center rounded-md border border-miyu-border bg-white/25 text-miyu-text"
+            aria-label={item.label}
+          >
+            <Icon className="h-4 w-4" />
+          </Link>
+        );
+      })}
+    </nav>
+  );
+}
+
+function SegmentButton({
+  active,
+  children,
+  onClick,
+  small = false,
+}: {
+  active: boolean;
+  children: React.ReactNode;
+  onClick: () => void;
+  small?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`rounded-md border font-mono text-xs font-bold transition-colors ${
+        small ? "px-4 py-2" : "px-5 py-2.5"
+      } ${
+        active
+          ? "border-miyu-text bg-miyu-btn text-miyu-text"
+          : "border-miyu-border bg-miyu-btn text-miyu-text hover:bg-miyu-btn-hover"
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
+function FilterGroup({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="border-b border-miyu-border p-4 lg:border-b-0 lg:border-r last:lg:border-r-0">
+      <p className="mb-3 font-mono text-xs uppercase tracking-wide text-miyu-text-muted">{title}</p>
+      <div className="flex flex-wrap gap-2">{children}</div>
+    </div>
+  );
+}
+
+function DetailPanel({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="overflow-hidden rounded-md border border-miyu-border bg-white/20">
+      {children}
+    </div>
+  );
+}
+
+function RankIcon({ rank, size = 40 }: { rank: string; size?: number }) {
+  const rankName = rank.toLowerCase();
+  const positions: Record<string, { row: number; col: number; label: string }> = {
+    bronze: { row: 1, col: 0, label: "Bronze" },
+    silver: { row: 1, col: 1, label: "Silver" },
+    gold: { row: 1, col: 2, label: "Gold" },
+    platinum: { row: 1, col: 3, label: "Platinum" },
+    diamond: { row: 2, col: 0, label: "Diamond" },
+    elite: { row: 0, col: 1, label: "Elite" },
+    champion: { row: 0, col: 2, label: "Champion" },
+    unreal: { row: 0, col: 3, label: "Unreal" },
+  };
+  const key = Object.keys(positions).find((name) => rankName.includes(name));
+  if (!key) return null;
+
+  const icon = positions[key];
+
+  return (
+    <span
+      className="inline-block shrink-0 bg-no-repeat"
+      role="img"
+      aria-label={`Rango ${icon.label}`}
+      style={{
+        width: size,
+        height: size,
+        backgroundImage: `url(${RANK_ICON_SPRITE})`,
+        backgroundSize: `${size * 4}px ${size * 5}px`,
+        backgroundPosition: `-${icon.col * size}px -${icon.row * size}px`,
+      }}
+    />
+  );
+}
+
+function StatCard({
+  label,
+  value,
+  highlight,
+  icon,
+}: {
+  label: string;
+  value: string | number;
+  highlight?: boolean;
+  icon?: React.ReactNode;
+}) {
+  return (
+    <div className={`min-h-[78px] rounded-md border bg-white/20 p-5 ${highlight ? "border-miyu-border" : "border-miyu-border"}`}>
+      <div className="flex items-center justify-between gap-3">
+        <div className="font-mono text-2xl font-bold leading-none text-miyu-text">{value}</div>
+        {icon}
+      </div>
+      <div className="mt-2 font-mono text-xs uppercase tracking-wide text-miyu-text-muted">{label}</div>
     </div>
   );
 }
 
 function MiniStat({ label, value }: { label: string; value: string | number }) {
   return (
-    <div className="p-3 bg-miyu-surface border border-miyu-border rounded-lg">
-      <div className="text-xs text-miyu-text-muted mb-1">{label}</div>
-      <div className="text-sm font-bold font-mono text-miyu-text">{value}</div>
+    <div className="rounded-md border border-miyu-border bg-white/20 p-5">
+      <div className="mb-2 font-mono text-xs uppercase tracking-wide text-miyu-text-muted">{label}</div>
+      <div className="font-mono text-lg font-bold text-miyu-text">{value}</div>
     </div>
   );
 }
@@ -971,46 +839,43 @@ function MiniStat({ label, value }: { label: string; value: string | number }) {
 function DetailBox({ title, subtitle, rightText, icon }: { title: string; subtitle: string; rightText: string; icon?: string }) {
   const iconSvg = (type?: string) => {
     switch (type) {
-      case "swords":
-        return (
-          <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5 text-miyu-text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="14.5 17.5 3 6 3 3 6 3 17.5 14.5"/><line x1="13" y1="19" x2="19" y2="13"/><line x1="16" y1="16" x2="20" y2="20"/><line x1="19" y1="21" x2="21" y2="19"/><polyline points="9.5 6.5 21 18 21 21 18 21 6.5 9.5"/><line x1="11" y1="5" x2="5" y2="11"/><line x1="8" y1="8" x2="4" y2="4"/><line x1="5" y1="3" x2="3" y2="5"/></svg>
-        );
+      case "target":
+        return <Target className="h-6 w-6 text-miyu-text" />;
       case "clock":
-        return (
-          <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5 text-miyu-text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-        );
+        return <Clock3 className="h-6 w-6 text-miyu-text" />;
       case "top3":
-        return (
-          <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5 text-miyu-text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5C7 4 9 7 12 7s5-3 7.5-3a2.5 2.5 0 0 1 0 5H18"/><path d="M18 9v8a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V9"/><path d="M12 3v6"/></svg>
-        );
+        return <Trophy className="h-6 w-6 text-miyu-text" />;
       case "top5":
-        return (
-          <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5 text-miyu-text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
-        );
+        return <MedalIcon />;
       case "top10":
-        return (
-          <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5 text-miyu-text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3v18h18"/><rect x="7" y="10" width="3" height="8"/><rect x="14" y="6" width="3" height="12"/></svg>
-        );
+        return <BarChart3 className="h-6 w-6 text-miyu-text" />;
       case "star":
-        return (
-          <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5 text-miyu-text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
-        );
+        return <Star className="h-6 w-6 text-miyu-text" />;
       default:
         return null;
     }
   };
 
   return (
-    <div className="border-b border-miyu-border py-4 flex justify-between items-center text-sm hover:bg-miyu-surface transition-colors px-3 rounded">
-      <div className="flex items-baseline gap-4">
+    <div className="flex items-center justify-between gap-4 border-b border-miyu-border px-5 py-4 text-sm last:border-b-0">
+      <div className="flex items-center gap-5">
         {icon && iconSvg(icon)}
         <div>
-          <strong className="text-miyu-text uppercase text-xs tracking-wider font-mono">{title}</strong>
-          <div className="text-xs text-miyu-text-muted/60 font-mono mt-0.5">{subtitle}</div>
+          <strong className="font-mono text-sm uppercase tracking-wide text-miyu-text">{title}</strong>
+          <div className="mt-1 font-mono text-xs text-miyu-text-muted">{subtitle}</div>
         </div>
       </div>
-      <div className="font-mono text-sm font-bold text-miyu-text">{rightText}</div>
+      <div className="text-right font-mono text-sm font-bold text-miyu-text">{rightText}</div>
     </div>
+  );
+}
+
+function MedalIcon() {
+  return (
+    <svg className="h-6 w-6 text-miyu-text" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="8" r="5" />
+      <path d="M8.5 12.5 7 22l5-3 5 3-1.5-9.5" />
+    </svg>
   );
 }
 

@@ -2,6 +2,7 @@
 
 # dependencies
 /node_modules
+*/node_modules/
 /.pnp
 .pnp.*
 .yarn/*
@@ -39,3 +40,14 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# docker
+*.env
+!.env.example
+/postgres_data/
+/kafka-data/
+/zookeeper-data/
+
+# cached images
+/public/tournament-images/*
+!/public/tournament-images/.gitkeep

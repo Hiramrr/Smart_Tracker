@@ -181,8 +181,8 @@ export function ShopView({ shop }: { shop: ShopData }) {
           onClick={() => setSelectedSection("all")}
           className={`rounded-full px-4 py-2 text-sm transition-colors ${
             selectedSection === "all"
-              ? "bg-miyu-accent text-white"
-              : "border border-miyu-border bg-white text-miyu-text-muted hover:bg-miyu-accent-light hover:text-miyu-text"
+              ? "border border-miyu-text bg-miyu-btn text-miyu-text"
+              : "border border-miyu-border bg-miyu-btn text-miyu-text hover:bg-miyu-btn-hover"
           }`}
         >
           todas
@@ -193,8 +193,8 @@ export function ShopView({ shop }: { shop: ShopData }) {
             onClick={() => setSelectedSection(section)}
             className={`rounded-full px-4 py-2 text-sm transition-colors ${
               selectedSection === section
-                ? "bg-miyu-accent text-white"
-                : "border border-miyu-border bg-white text-miyu-text-muted hover:bg-miyu-accent-light hover:text-miyu-text"
+                ? "border border-miyu-text bg-miyu-btn text-miyu-text"
+                : "border border-miyu-border bg-miyu-btn text-miyu-text hover:bg-miyu-btn-hover"
             }`}
           >
             {section} ({count})

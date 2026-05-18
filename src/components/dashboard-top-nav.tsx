@@ -2,47 +2,58 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { BarChart3, GitCompareArrows, ShoppingBag, Trophy, Users } from "lucide-react";
 
 const NAV_ITEMS = [
-  { href: "/dashboard", label: "jugador", match: (pathname: string) => pathname === "/dashboard" },
-  { href: "/dashboard/tournaments", label: "torneos", match: (pathname: string) => pathname.startsWith("/dashboard/tournaments") },
-  { href: "/dashboard/shop", label: "tienda", match: (pathname: string) => pathname.startsWith("/dashboard/shop") },
-  { href: "/dashboard/compare", label: "comparar", match: (pathname: string) => pathname.startsWith("/dashboard/compare") },
+  { href: "/dashboard/player", label: "Personas", icon: Users, match: (pathname: string) => pathname.startsWith("/dashboard/player") },
+  { href: "/dashboard/compare", label: "Comparacion", icon: GitCompareArrows, match: (pathname: string) => pathname.startsWith("/dashboard/compare") },
+  { href: "/dashboard/tournaments", label: "Torneos", icon: Trophy, match: (pathname: string) => pathname.startsWith("/dashboard/tournaments") },
+  { href: "/dashboard/shop", label: "Tienda", icon: ShoppingBag, match: (pathname: string) => pathname.startsWith("/dashboard/shop") },
 ];
 
 export function DashboardTopNav() {
   const pathname = usePathname();
 
   return (
-    <header className="sticky top-0 z-20 border-b border-miyu-border/80 bg-miyu-bg/90 backdrop-blur">
-      <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-4 px-4 py-4 sm:px-6">
-        <Link
-          href="/dashboard"
-          className="text-sm font-bold uppercase tracking-[0.18em] text-miyu-text"
-        >
-          miyu tracker
-        </Link>
+    <aside className="sticky top-0 hidden h-screen w-[260px] shrink-0 border-r border-miyu-border bg-miyu-bg/95 px-5 py-6 lg:flex lg:flex-col">
+      <Link href="/dashboard" className="mb-10 flex items-center gap-3 text-miyu-text">
+        <span className="flex h-9 w-9 items-center justify-center">
+          <BarChart3 className="h-8 w-8 stroke-[2.2]" />
+        </span>
+        <span>
+          <span className="block text-xl font-bold tracking-[0.08em]">FN.STATS</span>
+          <span className="block text-xs text-miyu-text-muted">Fortnite Tracker</span>
+        </span>
+      </Link>
 
-        <nav aria-label="Dashboard" className="flex items-center gap-2 rounded-full border border-miyu-border bg-white/70 p-1">
-          {NAV_ITEMS.map((item) => {
-            const isActive = item.match(pathname);
+      <nav aria-label="Dashboard" className="space-y-8">
+        <div>
+          <p className="mb-3 px-2 text-xs font-bold uppercase tracking-[0.12em] text-miyu-text">
+            Principal
+          </p>
+          <div className="space-y-1">
+            {NAV_ITEMS.map((item) => {
+              const isActive = item.match(pathname);
+              const Icon = item.icon;
 
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={`rounded-full px-4 py-2 text-sm font-medium transition-colors ${
-                  isActive
-                    ? "bg-miyu-accent text-white"
-                    : "text-miyu-text-muted hover:bg-miyu-accent-light hover:text-miyu-text"
-                }`}
-              >
-                {item.label}
-              </Link>
-            );
-          })}
-        </nav>
-      </div>
-    </header>
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={`flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
+                    isActive
+                      ? "bg-miyu-secondary font-semibold text-miyu-text"
+                      : "text-miyu-text hover:bg-miyu-secondary/70"
+                  }`}
+                >
+                  <Icon className="h-4 w-4" />
+                  {item.label}
+                </Link>
+              );
+            })}
+          </div>
+        </div>
+      </nav>
+    </aside>
   );
 }
