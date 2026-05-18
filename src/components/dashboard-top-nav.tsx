@@ -7,6 +7,7 @@ const NAV_ITEMS = [
   { href: "/dashboard", label: "jugador", match: (pathname: string) => pathname === "/dashboard" },
   { href: "/dashboard/tournaments", label: "torneos", match: (pathname: string) => pathname.startsWith("/dashboard/tournaments") },
   { href: "/dashboard/shop", label: "tienda", match: (pathname: string) => pathname.startsWith("/dashboard/shop") },
+  { href: "/dashboard/compare", label: "comparar", match: (pathname: string) => pathname.startsWith("/dashboard/compare") },
 ];
 
 export function DashboardTopNav() {
