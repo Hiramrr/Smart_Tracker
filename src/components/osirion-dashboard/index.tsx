@@ -13,16 +13,20 @@ import {
   Users,
 } from "lucide-react";
 
+interface RankedMode {
+  rankingType: string;
+  rankingTrackId: string;
+  lastUpdatedAt?: string | null;
+  currentDivision: { divisionName: string; divisionGroupName?: string } | null;
+  highestDivision: { divisionName: string; divisionGroupName?: string } | null;
+  promotionProgress?: number;
+  currentPlayerRanking?: number | null;
+}
+
 interface RankedData {
   success: boolean;
-  rank: {
-    rankingType: string;
-    rankingTrackId: string;
-    lastUpdatedAt?: string;
-    currentDivision: { divisionName: string } | string | null;
-    promotionProgress: number;
-    currentPlayerRanking: number;
-  } | null;
+  rank: RankedMode | null;
+  ranks?: RankedMode[];
 }
 
 interface ModeStats {
@@ -118,7 +122,6 @@ export default function OsirionDashboard({
   const [selectedInputMethod, setSelectedInputMethod] = useState<InputMethod | "all">("all");
   const [selectedGameMode, setSelectedGameMode] = useState<GameMode | "all">("all");
   const [activeTab, setActiveTab] = useState<"overview" | "modes" | "ranked">("overview");
-  const initialSearchDone = useRef(false);
 
   const fetchStats = useCallback(async (accountId: string, displayName: string, timeframe: "season" | "lifetime") => {
     setLoadingMsg("obteniendo estadisticas...");
@@ -204,21 +207,22 @@ export default function OsirionDashboard({
     }
   };
 
+  const handleSearchRef = useRef(handleSearch);
+  handleSearchRef.current = handleSearch;
+
   const searchFromHistory = (displayName: string) => {
     setSearchInput(displayName);
     void handleSearch({ preventDefault: () => undefined } as React.FormEvent, displayName);
   };
 
   useEffect(() => {
-    if (!initialPlayer || initialSearchDone.current) return;
-    initialSearchDone.current = true;
+    if (!initialPlayer || initialPlayer === currentAccountId) return;
     setSearchInput(initialDisplayName || initialPlayer);
     const timeout = window.setTimeout(() => {
-      void handleSearch({ preventDefault: () => undefined } as React.FormEvent, initialPlayer, initialDisplayName);
+      void handleSearchRef.current({ preventDefault: () => undefined } as React.FormEvent, initialPlayer, initialDisplayName);
     }, 0);
     return () => window.clearTimeout(timeout);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialPlayer, initialDisplayName]);
+  }, [initialPlayer, initialDisplayName, currentAccountId]);
 
   const setTimeframe = async (tf: "season" | "lifetime") => {
     if (currentTimeframe === tf) return;
@@ -664,20 +668,54 @@ export default function OsirionDashboard({
                     )}
                   </div>
 
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="border border-miyu-border rounded-lg p-4">
-                      <div className="text-xs text-miyu-text-muted font-mono mb-1">tipo de ranking</div>
-                      <div className="text-sm font-bold text-miyu-text font-mono">{rankedData.rank.rankingType}</div>
-                    </div>
-                    <div className="border border-miyu-border rounded-lg p-4">
-                      <div className="text-xs text-miyu-text-muted font-mono mb-1">track</div>
-                      <div className="text-sm font-bold text-miyu-text font-mono break-all">{rankedData.rank.rankingTrackId}</div>
-                    </div>
-                  </div>
-
-                  {rankedData.rank.lastUpdatedAt && (
-                    <div className="text-xs text-miyu-text-muted font-mono">
-                      ultima actualizacion: {new Date(rankedData.rank.lastUpdatedAt).toLocaleString("es-MX")}
+                  {rankedData.ranks && rankedData.ranks.length > 0 && (
+                    <div>
+                      <div className="mb-3 font-mono text-sm font-bold uppercase tracking-wide">Historial de rangos</div>
+                      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                        {rankedData.ranks.map((mode) => {
+                          const currentName = mode.currentDivision?.divisionName || "Sin rango";
+                          const highestName = mode.highestDivision?.divisionName || "Sin rango";
+                          const isCurrent = mode.rankingType === rankedData.rank?.rankingType;
+                          return (
+                            <div
+                              key={mode.rankingType}
+                              className={`rounded-lg border p-4 transition-colors ${isCurrent ? "border-miyu-text bg-miyu-surface" : "border-miyu-border bg-white/20 hover:bg-miyu-surface"}`}
+                            >
+                              <div className="flex items-center justify-between mb-2">
+                                <span className="font-mono text-xs font-bold uppercase text-miyu-text">{mode.rankingType}</span>
+                                {isCurrent && <span className="rounded bg-miyu-text px-2 py-0.5 font-mono text-[10px] text-white">ACTUAL</span>}
+                              </div>
+                              <div className="flex items-center gap-3 mb-3">
+                                <RankIcon rank={currentName} size={32} />
+                                <div>
+                                  <div className="font-mono text-sm font-bold text-miyu-text">{currentName}</div>
+                                  <div className="font-mono text-[10px] text-miyu-text-muted">actual</div>
+                                </div>
+                              </div>
+                              <div className="border-t border-miyu-border pt-2">
+                                <div className="flex items-center justify-between">
+                                  <span className="font-mono text-[10px] text-miyu-text-muted">maximo alcanzado</span>
+                                  <span className="font-mono text-xs font-bold text-miyu-text">{highestName}</span>
+                                </div>
+                                {mode.promotionProgress !== undefined && Number.isInteger(mode.promotionProgress) && (
+                                  <div className="mt-2">
+                                    <div className="flex justify-between font-mono text-[10px] text-miyu-text-muted mb-0.5">
+                                      <span>progreso</span>
+                                      <span>{mode.promotionProgress}%</span>
+                                    </div>
+                                    <div className="w-full bg-miyu-border rounded-full h-1.5">
+                                      <div
+                                        className="bg-miyu-accent h-1.5 rounded-full transition-all"
+                                        style={{ width: `${mode.promotionProgress}%` }}
+                                      />
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
                   )}
                 </>

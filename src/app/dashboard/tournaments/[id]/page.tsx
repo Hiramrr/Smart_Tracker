@@ -4,77 +4,134 @@ import { useEffect, useState, useCallback, useMemo } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 
-interface EventWindow {
-  eventWindowId: string;
-  beginTime: string;
-  endTime: string;
-  round: number;
-  scoreLocations?: ScoreLocation[];
-}
-
-interface ScoreLocation {
-  leaderboardEventId: string;
-  leaderboardEventWindowId: string;
-  isMain: boolean;
-  scoringRules?: ScoringRule[];
-  payoutTables?: PayoutTable[];
+interface ScoringRewardTier {
+  keyValue: number;
+  multiplicative: boolean;
+  pointsEarned: number;
 }
 
 interface ScoringRule {
-  trackedStat: string;
   matchRule: string;
-  rewardTiers?: { keyValue: string; pointsEarned: number; multiplicative: boolean }[];
+  rewardTiers: ScoringRewardTier[];
+  trackedStat: string;
+}
+
+interface Payout {
+  quantity: number;
+  rewardMode: string;
+  rewardType: string;
+  value: string;
+}
+
+interface PayoutTableRank {
+  payouts: Payout[];
+  threshold: number;
 }
 
 interface PayoutTable {
+  ranks: PayoutTableRank[];
   scoringType: string;
-  ranks?: {
-    threshold: number;
-    payouts?: { rewardType: string; rewardMode?: string; value: string; quantity: number }[];
-  }[];
+  scoreId?: string;
+}
+
+interface ScoreLocation {
+  isMain: boolean;
+  leaderboardEventId: string;
+  leaderboardEventWindowId: string;
+  payoutTables: PayoutTable[];
+  scoringRules: ScoringRule[];
+  scoringType: string;
+  scoreId?: string;
+}
+
+interface EventWindow {
+  additionalRequirements: unknown[];
+  beginTime: string;
+  endTime: string;
+  eventWindowId: string;
+  matchCap: number | null;
+  metadata: Record<string, unknown>;
+  playlistId: string | null;
+  requireAllTokens: string[];
+  requireAllTokensCaller: string[];
+  requireAnyTokens: string[];
+  requireAnyTokensCaller: string[];
+  requireNoneTokensCaller: string[];
+  round: number;
+  scoreLocations: ScoreLocation[];
+}
+
+interface TournamentDisplayData {
+  tournamentDisplayId?: string;
+  backgroundLeftColor?: string;
+  backgroundRightColor?: string;
+  backgroundTextColor?: string;
+  backgroundTitle?: string;
+  baseColor?: string;
+  detailsDescription?: string;
+  flavorDescription?: string;
+  highlightColor?: string;
+  loadingScreenImage?: string;
+  longFormatTitle?: string;
+  playlistDescription?: string;
+  playlistTileImage?: string;
+  posterBackImage?: string;
+  posterFadeColor?: string;
+  posterFrontImage?: string;
+  primaryColor?: string;
+  roundNames?: string[];
+  secondaryColor?: string;
+  seriesPointLeaderboardName?: string;
+  shadowColor?: string;
+  squarePosterImage?: string;
+  titleColor?: string;
+  titleLine1?: string;
+  titleLine2?: string;
+  tournamentViewBackgroundImage?: string;
 }
 
 interface Tournament {
-  eventId: string;
+  displayData: TournamentDisplayData;
   eventGroup: string;
-  regions: string[];
-  platforms: string[];
-  displayData: {
-    titleLine1: string;
-    titleLine2: string;
-    longFormatTitle: string;
-    flavorDescription: string;
-    playlistDescription: string;
-    primaryColor: string;
-    secondaryColor: string;
-    posterBackImage: string;
-    squarePosterImage: string;
-    tournamentViewBackgroundImage: string;
-    playlistTileImage: string;
-    roundNames: string[];
-  };
+  eventId: string;
   eventWindows: EventWindow[];
+  metadata: Record<string, unknown>;
+  platforms: string[];
+  regions: string[];
+}
+
+interface LeaderboardSessionHistoryEntry {
+  endTime: string;
+  sessionId: string;
+  trackedStats: Record<string, number>;
+}
+
+interface LeaderboardPlayer {
+  accountId: string;
+  username: string | null;
+  flagToken: string | null;
 }
 
 interface LeaderboardEntry {
-  teamId: string;
-  players: { accountId: string; username: string | null; flagToken: string | null }[];
-  pointsEarned: number;
-  score: number;
-  rank: number;
   percentile: number;
-  sessionHistory?: { sessionId: string; endTime: string; trackedStats: Record<string, number> }[];
+  players: LeaderboardPlayer[];
+  pointsEarned: number;
+  rank: number;
+  score: number;
+  sessionHistory: LeaderboardSessionHistoryEntry[];
+  teamId: string;
+  unscoredSessions: string[];
 }
 
 interface LeaderboardData {
   success: boolean;
   leaderboard: {
+    entries: LeaderboardEntry[];
     leaderboardEventId: string;
     leaderboardEventWindowId: string;
     page: number;
     totalPages: number;
     updatedAt: string;
-    entries: LeaderboardEntry[];
   };
 }
 
@@ -229,10 +286,45 @@ function formatScoringRule(rule: ScoringRule) {
   return `${label}: ${tiers.length} niveles`;
 }
 
+function formatScoringRuleDetailed(rule: ScoringRule): string {
+  const tiers = rule.rewardTiers || [];
+  if (tiers.length === 0) return rule.trackedStat;
+  const first = tiers[0];
+  const suffix = first.multiplicative ? "x" : "pts";
+  return `${rule.trackedStat}: ${first.pointsEarned}${suffix} cada ${first.keyValue}`;
+}
+
+function getRequirements(window: EventWindow): string[] {
+  const reqs: string[] = [];
+  if (window.matchCap !== null && window.matchCap !== undefined) {
+    reqs.push(`Max ${window.matchCap} partidas`);
+  }
+  if (window.playlistId) {
+    reqs.push(`Playlist: ${window.playlistId}`);
+  }
+  if (window.requireAllTokens.length > 0) {
+    reqs.push(`Requiere: ${window.requireAllTokens.join(", ")}`);
+  }
+  if (window.requireAnyTokens.length > 0) {
+    reqs.push(`Cualquiera de: ${window.requireAnyTokens.join(", ")}`);
+  }
+  if (window.requireNoneTokensCaller.length > 0) {
+    reqs.push(`Excluye: ${window.requireNoneTokensCaller.join(", ")}`);
+  }
+  if (window.additionalRequirements.length > 0) {
+    reqs.push(`Reqs adicionales: ${JSON.stringify(window.additionalRequirements)}`);
+  }
+  return reqs;
+}
+
 function getMainScoreLocation(tournament: Tournament) {
   return tournament.eventWindows
-    .flatMap((window) => window.scoreLocations || [])
-    .find((location) => location.isMain) || tournament.eventWindows.flatMap((window) => window.scoreLocations || [])[0];
+    .flatMap((window) => window.scoreLocations)
+    .find((location) => location.isMain) || tournament.eventWindows.flatMap((window) => window.scoreLocations)[0];
+}
+
+function getScoreLocation(window: EventWindow): ScoreLocation | undefined {
+  return window.scoreLocations.find((s) => s.isMain) || window.scoreLocations[0];
 }
 
 const TOURNAMENT_REGIONS = ["ASIA", "BR", "EU", "ME", "NAC", "NAE", "NAW", "OCE", "ONSITE"];
@@ -245,19 +337,33 @@ function getTrackedStat(stats: Record<string, number>, ...keys: string[]) {
 }
 
 function getEntryMatches(entry: LeaderboardEntry) {
-  return entry.sessionHistory?.reduce((total, session) => {
+  return entry.sessionHistory.reduce((total, session) => {
     return total + (getTrackedStat(session.trackedStats, "MATCH_PLAYED_STAT", "matchesplayed") || 0);
-  }, 0) || 0;
+  }, 0);
 }
 
 function getEntryWins(entry: LeaderboardEntry) {
-  return entry.sessionHistory?.reduce((total, session) => {
+  return entry.sessionHistory.reduce((total, session) => {
     return total + (getTrackedStat(session.trackedStats, "VICTORY_ROYALE_STAT", "placetop1") || 0);
-  }, 0) || 0;
+  }, 0);
+}
+
+function getEntryAvgPlacement(entry: LeaderboardEntry): number | null {
+  const placements = entry.sessionHistory
+    .map((s) => getTrackedStat(s.trackedStats, "PLACEMENT_STAT_INDEX", "placetop1"))
+    .filter((p): p is number => typeof p === "number");
+  if (placements.length === 0) return null;
+  return Math.round(placements.reduce((a, b) => a + b, 0) / placements.length);
+}
+
+function getEntryTotalElims(entry: LeaderboardEntry) {
+  return entry.sessionHistory.reduce((total, session) => {
+    return total + (getTrackedStat(session.trackedStats, "TEAM_ELIMS_STAT_INDEX", "kills", "eliminations") || 0);
+  }, 0);
 }
 
 function getPreferredStatKeys(entry: LeaderboardEntry | undefined) {
-  const stats = entry?.sessionHistory?.[0]?.trackedStats;
+  const stats = entry?.sessionHistory[0]?.trackedStats;
   if (!stats) return [];
 
   const preferred = [
@@ -265,9 +371,33 @@ function getPreferredStatKeys(entry: LeaderboardEntry | undefined) {
     "PLACEMENT_STAT_INDEX",
     "TIME_ALIVE_STAT",
     "PLACEMENT_TIEBREAKER_STAT",
+    "MATCH_PLAYED_STAT",
+    "VICTORY_ROYALE_STAT",
   ];
 
-  return preferred.filter((key) => key in stats).slice(0, 2);
+  return preferred.filter((key) => key in stats).slice(0, 3);
+}
+
+function getAllTrackedStatKeys(entry: LeaderboardEntry | undefined): string[] {
+  if (!entry || entry.sessionHistory.length === 0) return [];
+  const keys = new Set<string>();
+  for (const session of entry.sessionHistory) {
+    for (const key of Object.keys(session.trackedStats)) {
+      keys.add(key);
+    }
+  }
+  return Array.from(keys);
+}
+
+function formatStatValue(key: string, value: number): string {
+  if (key === "TIME_ALIVE_STAT" && typeof value === "number") {
+    const mins = Math.round(value / 60);
+    return `${mins}m`;
+  }
+  if (key === "PLACEMENT_STAT_INDEX" && typeof value === "number") {
+    return `Top ${value}`;
+  }
+  return String(value);
 }
 
 function formatStatLabel(key: string) {
@@ -280,8 +410,26 @@ function formatStatLabel(key: string) {
       return "Alive";
     case "PLACEMENT_TIEBREAKER_STAT":
       return "Tiebreak";
+    case "MATCH_PLAYED_STAT":
+      return "Matches";
+    case "VICTORY_ROYALE_STAT":
+      return "Wins";
+    case "ACCURACY_STAT":
+      return "Accuracy";
+    case "ASSISTS_STAT":
+      return "Assists";
+    case "DAMAGE_DEALT_STAT":
+      return "Dmg dealt";
+    case "DAMAGE_TAKEN_STAT":
+      return "Dmg taken";
+    case "DAMAGE_TO_PLAYERS_STAT":
+      return "Dmg players";
+    case "HEADSHOTS_STAT":
+      return "Headshots";
+    case "REVIVES_STAT":
+      return "Revives";
     default:
-      return key;
+      return key.replace(/_STAT(_INDEX)?$/i, "").replace(/_/g, " ").toLowerCase();
   }
 }
 
@@ -374,16 +522,17 @@ function LeaderboardPanel({ leaderboardEventId, leaderboardEventWindowId, roundN
                   <th className="text-left py-3 px-4 text-miyu-text-muted font-mono text-xs w-12">#</th>
                   <th className="text-left py-3 px-4 text-miyu-text-muted font-mono text-xs">Team</th>
                   <th className="text-right py-3 px-4 text-miyu-text-muted font-mono text-xs">Points</th>
+                  <th className="text-right py-3 px-4 text-miyu-text-muted font-mono text-xs">%</th>
                   <th className="text-right py-3 px-4 text-miyu-text-muted font-mono text-xs">Matches</th>
                   <th className="text-right py-3 px-4 text-miyu-text-muted font-mono text-xs">Wins</th>
-                  {statKeys.slice(0, 2).map(key => (
+                  {statKeys.slice(0, 3).map(key => (
                     <th key={key} className="text-right py-3 px-4 text-miyu-text-muted font-mono text-xs capitalize">{formatStatLabel(key)}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {filteredEntries.map((entry) => {
-                  const lastSession = entry.sessionHistory?.[entry.sessionHistory.length - 1];
+                  const lastSession = entry.sessionHistory[entry.sessionHistory.length - 1];
                   const stats = lastSession?.trackedStats || {};
                   const isSelected = selectedEntry?.teamId === entry.teamId;
                   const matchesPlayed = getEntryMatches(entry);
@@ -423,11 +572,12 @@ function LeaderboardPanel({ leaderboardEventId, leaderboardEventWindowId, roundN
                         </div>
                       </td>
                       <td className="py-3 px-4 text-right font-mono font-bold text-miyu-text">{entry.pointsEarned}</td>
+                      <td className="py-3 px-4 text-right font-mono text-miyu-text-muted">{entry.percentile.toFixed(1)}%</td>
                       <td className="py-3 px-4 text-right font-mono text-miyu-text-muted">{matchesPlayed || "—"}</td>
                       <td className="py-3 px-4 text-right font-mono text-miyu-text-muted">
                         {wins || "—"}
                       </td>
-                      {statKeys.slice(0, 2).map(key => (
+                      {statKeys.slice(0, 3).map(key => (
                         <td key={key} className="py-3 px-4 text-right font-mono text-miyu-text-muted">{stats[key] ?? "—"}</td>
                       ))}
                     </tr>
@@ -452,10 +602,11 @@ function LeaderboardPanel({ leaderboardEventId, leaderboardEventWindowId, roundN
 
       {/* Side panel - selected entry details */}
       {selectedEntry && (
-        <div className="w-72 flex-shrink-0">
-          <div className="bg-miyu-surface border border-miyu-border rounded-xl p-4 sticky top-4">
+        <div className="w-80 flex-shrink-0">
+          <div className="bg-miyu-surface border border-miyu-border rounded-xl p-4 sticky top-4 max-h-[calc(100vh-2rem)] overflow-y-auto">
             <div className="text-center mb-4">
               <div className="text-2xl font-bold text-miyu-text font-mono">#{selectedEntry.rank}</div>
+              <div className="text-xs text-miyu-text-muted font-mono">Percentil: {selectedEntry.percentile.toFixed(2)}%</div>
             </div>
 
             <div className="space-y-2 mb-4">
@@ -480,36 +631,50 @@ function LeaderboardPanel({ leaderboardEventId, leaderboardEventWindowId, roundN
                 <div className="text-xs text-miyu-text-muted">Points</div>
               </div>
               <div>
-                <div className="text-lg font-bold text-miyu-text font-mono">{getEntryMatches(selectedEntry) || 0}</div>
+                <div className="text-lg font-bold text-miyu-text font-mono">{getEntryMatches(selectedEntry)}</div>
                 <div className="text-xs text-miyu-text-muted">Matches</div>
               </div>
               <div>
-                <div className="text-lg font-bold text-miyu-text font-mono">
-                  {getEntryWins(selectedEntry) || 0}
-                </div>
+                <div className="text-lg font-bold text-miyu-text font-mono">{getEntryWins(selectedEntry)}</div>
                 <div className="text-xs text-miyu-text-muted">Wins</div>
               </div>
             </div>
 
-            {selectedEntry.sessionHistory?.map((session, i) => {
+            {getEntryAvgPlacement(selectedEntry) !== null && (
+              <div className="mb-3 rounded-lg border border-miyu-border bg-white/10 p-2 text-center">
+                <div className="text-xs text-miyu-text-muted">Promedio de placement</div>
+                <div className="text-sm font-bold text-miyu-text font-mono">Top {getEntryAvgPlacement(selectedEntry)}</div>
+              </div>
+            )}
+
+            {selectedEntry.unscoredSessions.length > 0 && (
+              <div className="mb-3 rounded-lg border border-amber-500/20 bg-amber-500/5 p-2">
+                <div className="text-[10px] text-amber-600 font-bold uppercase mb-1">Sesiones sin puntos</div>
+                <div className="text-xs text-miyu-text-muted">{selectedEntry.unscoredSessions.length} sesion(es) no contaron para el puntaje</div>
+              </div>
+            )}
+
+            <div className="text-xs font-bold text-miyu-text-muted font-mono uppercase mb-2">Sesiones ({selectedEntry.sessionHistory.length})</div>
+            {selectedEntry.sessionHistory.map((session, i) => {
               const stats = session.trackedStats;
+              const allKeys = Object.keys(stats);
               return (
                 <div key={session.sessionId} className="border border-miyu-border rounded-lg p-3 mb-2">
-                  <div className="text-xs text-miyu-text-muted mb-2">Match #{i + 1}</div>
-                  <div className="grid grid-cols-2 gap-2 text-xs">
-                    <div>
-                      <span className="text-miyu-text-muted">Placement:</span>
-                      <span className="text-miyu-text ml-1 font-mono">
-                        {getTrackedStat(stats, "PLACEMENT_STAT_INDEX", "placetop1") !== undefined
-                          ? `Top ${getTrackedStat(stats, "PLACEMENT_STAT_INDEX", "placetop1")}`
-                          : "—"}
-                      </span>
-                    </div>
-                    <div>
-                      <span className="text-miyu-text-muted">Elims:</span>
-                      <span className="text-miyu-text ml-1 font-mono">{getTrackedStat(stats, "TEAM_ELIMS_STAT_INDEX", "kills", "eliminations") ?? "—"}</span>
-                    </div>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs text-miyu-text-muted">Match #{i + 1}</span>
+                    <span className="text-[10px] text-miyu-text-muted">{new Date(session.endTime).toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit" })}</span>
                   </div>
+                  <div className="grid grid-cols-2 gap-x-2 gap-y-1 text-xs">
+                    {allKeys.slice(0, 6).map((key) => (
+                      <div key={key}>
+                        <span className="text-miyu-text-muted">{formatStatLabel(key)}:</span>
+                        <span className="text-miyu-text ml-1 font-mono">{formatStatValue(key, stats[key])}</span>
+                      </div>
+                    ))}
+                  </div>
+                  {allKeys.length > 6 && (
+                    <div className="text-[10px] text-miyu-text-muted mt-1">+{allKeys.length - 6} stats mas</div>
+                  )}
                 </div>
               );
             })}
@@ -558,7 +723,7 @@ export default function TournamentDetailPage() {
 
         setTournament(found);
         const now = new Date();
-        const roundsWithLeaderboard = found.eventWindows.filter((w) => (w.scoreLocations?.length ?? 0) > 0);
+        const roundsWithLeaderboard = found.eventWindows.filter((w) => w.scoreLocations.length > 0);
         const preferredRound =
           roundsWithLeaderboard.find((w) => new Date(w.beginTime) <= now && new Date(w.endTime) >= now) ||
           roundsWithLeaderboard.find((w) => new Date(w.beginTime) > now) ||
@@ -610,8 +775,8 @@ export default function TournamentDetailPage() {
     if (!latest) return window;
     return new Date(window.endTime) > new Date(latest.endTime) ? window : latest;
   }, null);
-  const prizeRows = tournamentMainScoreLocation?.payoutTables?.flatMap((table) => table.ranks || []) || [];
-  const topPrize = prizeRows[0]?.payouts?.[0];
+  const prizeRows = tournamentMainScoreLocation?.payoutTables.flatMap((table) => table.ranks) || [];
+  const topPrize = prizeRows[0]?.payouts[0];
   const scoringRules = tournamentMainScoreLocation?.scoringRules || [];
 
   const tabs: { key: TabType; label: string }[] = [
@@ -748,57 +913,91 @@ export default function TournamentDetailPage() {
           {/* Rounds */}
           <div className="bg-miyu-surface border border-miyu-border rounded-xl p-6">
             <h3 className="text-sm font-bold text-miyu-text mb-4 font-mono">RONDAS</h3>
-            <div className="space-y-2">
+            <div className="space-y-3">
               {tournament.eventWindows?.map((w) => {
                 const isPast = new Date(w.endTime) < new Date();
                 const isLive = new Date(w.beginTime) <= new Date() && new Date(w.endTime) >= new Date();
                 const roundName = tournament.displayData?.roundNames?.[w.round - 1] || `Round ${w.round}`;
-                const hasLeaderboard = (w.scoreLocations?.length ?? 0) > 0;
+                const hasLeaderboard = w.scoreLocations.length > 0;
+                const reqs = getRequirements(w);
+                const scoreLoc = getScoreLocation(w);
+                const roundScoringRules = scoreLoc?.scoringRules || [];
 
                 return (
                   <div
                     key={w.eventWindowId}
-                    className={`flex items-center justify-between p-4 rounded-lg border ${
+                    className={`rounded-lg border p-4 transition-colors ${
                       isLive ? "border-red-500/30 bg-red-500/5" :
                       isPast ? "border-miyu-border/50" :
                       "border-miyu-border"
                     }`}
                   >
-                    <div className="flex items-center gap-3">
-                      <span className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${
-                        isLive ? "bg-red-500 text-white" :
-                        isPast ? "bg-miyu-text-muted/20 text-miyu-text-muted" :
-                        "bg-miyu-btn text-miyu-text border border-miyu-text"
-                      }`}>
-                        {w.round}
-                      </span>
-                      <div>
-                        <div className="text-sm text-miyu-text font-medium">{roundName}</div>
-                        <div className="text-xs text-miyu-text-muted">{formatDate(w.beginTime)} - {formatDate(w.endTime)}</div>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <span className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${
+                          isLive ? "bg-red-500 text-white" :
+                          isPast ? "bg-miyu-text-muted/20 text-miyu-text-muted" :
+                          "bg-miyu-btn text-miyu-text border border-miyu-text"
+                        }`}>
+                          {w.round}
+                        </span>
+                        <div>
+                          <div className="text-sm text-miyu-text font-medium">{roundName}</div>
+                          <div className="text-xs text-miyu-text-muted">{formatDate(w.beginTime)} - {formatDate(w.endTime)}</div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        {isLive && <StatusBadge status="live" />}
+                        {isPast && <span className="text-xs text-miyu-text-muted">Finalizada</span>}
+                        {!isLive && !isPast && <span className="text-xs text-miyu-text">{formatRelativeTime(w.beginTime)}</span>}
+                        {hasLeaderboard && (
+                          <button
+                            onClick={() => { setSelectedRound(w); setActiveTab("leaderboards"); }}
+                            className="rounded-lg border border-miyu-text bg-miyu-btn px-3 py-1.5 text-xs font-bold text-miyu-text hover:bg-miyu-btn-hover"
+                          >
+                            Ver leaderboard
+                          </button>
+                        )}
                       </div>
                     </div>
-                    <div className="flex items-center gap-3">
-                      {isLive && <StatusBadge status="live" />}
-                      {isPast && <span className="text-xs text-miyu-text-muted">Finalizada</span>}
-                      {!isLive && !isPast && <span className="text-xs text-miyu-text">{formatRelativeTime(w.beginTime)}</span>}
-                      {hasLeaderboard && (
-                        <button
-                          onClick={() => { setSelectedRound(w); setActiveTab("leaderboards"); }}
-                          className="rounded-lg border border-miyu-text bg-miyu-btn px-3 py-1.5 text-xs font-bold text-miyu-text hover:bg-miyu-btn-hover"
-                        >
-                          Ver leaderboard
-                        </button>
-                      )}
-                    </div>
+
+                    {reqs.length > 0 && (
+                      <div className="mt-3 flex flex-wrap gap-1.5">
+                        {reqs.map((req, i) => (
+                          <span key={i} className="px-2 py-0.5 rounded bg-miyu-bg border border-miyu-border text-[10px] text-miyu-text-muted font-mono">
+                            {req}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+
+                    {roundScoringRules.length > 0 && (
+                      <div className="mt-2 text-xs text-miyu-text-muted">
+                        {roundScoringRules.slice(0, 2).map((r) => formatScoringRule(r)).join(" | ")}
+                        {roundScoringRules.length > 2 && ` (+${roundScoringRules.length - 2} mas)`}
+                      </div>
+                    )}
                   </div>
                 );
               })}
             </div>
           </div>
 
+          {/* Metadata */}
+          {Object.keys(tournament.metadata).length > 0 && (
+            <div className="bg-miyu-surface border border-miyu-border rounded-xl p-4">
+              <h3 className="text-xs font-bold text-miyu-text-muted mb-2 font-mono uppercase">Metadata</h3>
+              <pre className="text-[10px] text-miyu-text-muted font-mono overflow-x-auto">{JSON.stringify(tournament.metadata, null, 2)}</pre>
+            </div>
+          )}
+
           {/* Event ID */}
           <div className="bg-miyu-surface border border-miyu-border rounded-xl p-4">
             <div className="text-xs text-miyu-text-muted font-mono">Event ID: {tournament.eventId}</div>
+            <div className="text-xs text-miyu-text-muted font-mono mt-1">Event Group: {tournament.eventGroup}</div>
+            {tournament.displayData?.tournamentDisplayId && (
+              <div className="text-xs text-miyu-text-muted font-mono mt-1">Display ID: {tournament.displayData.tournamentDisplayId}</div>
+            )}
           </div>
         </div>
       )}
@@ -807,7 +1006,7 @@ export default function TournamentDetailPage() {
         <div className="space-y-4">
           {/* Round selector */}
           <div className="flex flex-wrap gap-2">
-            {tournament.eventWindows?.filter(w => (w.scoreLocations?.length ?? 0) > 0).map(w => {
+            {tournament.eventWindows?.filter(w => w.scoreLocations.length > 0).map(w => {
               const roundName = tournament.displayData?.roundNames?.[w.round - 1] || `Round ${w.round}`;
               const isSelected = selectedRound?.eventWindowId === w.eventWindowId;
               return (
@@ -874,7 +1073,7 @@ export default function TournamentDetailPage() {
             {prizeRows.length > 0 ? (
               <div className="space-y-2">
                 {prizeRows.slice(0, 8).map((rank) => {
-                  const payout = rank.payouts?.[0];
+                  const payout = rank.payouts[0];
                   return (
                     <div key={rank.threshold} className="flex items-center justify-between rounded-lg border border-miyu-border px-3 py-2 text-sm">
                       <span className="font-mono text-miyu-text">Top {rank.threshold}</span>

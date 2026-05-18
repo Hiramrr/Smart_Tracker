@@ -69,6 +69,7 @@ function buildResponse(action: string, data: unknown, status: number): NextRespo
             currentPlayerRanking: selectedMode.currentPlayerRanking,
           }
         : null,
+      ranks: modes,
     });
   }
 
@@ -334,6 +335,7 @@ export async function GET(req: NextRequest) {
               currentPlayerRanking: selectedMode.currentPlayerRanking,
             }
           : null,
+        ranks: modes,
       });
     }
 
