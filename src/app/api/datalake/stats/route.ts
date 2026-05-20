@@ -40,13 +40,25 @@ export async function GET() {
        ORDER BY total DESC`
     );
 
-    // Últimas llamadas
+    // Últimas llamadas con parámetros
     const recentCallsResult = await query(
-      `SELECT id, action, api_source, response_status, duration_ms, created_at
+      `SELECT id, action, api_source, response_status, duration_ms, created_at, parameters
        FROM api_calls
        ORDER BY created_at DESC
        LIMIT 10`
     );
+
+    // Estadísticas de Snapshots
+    const snapshotsCountResult = await query("SELECT COUNT(*) as total FROM player_snapshots");
+    const recentSnapshotsResult = await query(
+      "SELECT id, display_name, platform, captured_at FROM player_snapshots ORDER BY captured_at DESC LIMIT 5"
+    );
+
+    // Estadísticas de Tienda
+    const shopHistoryCountResult = await query("SELECT COUNT(*) as total FROM shop_history");
+    const cosmeticsCountResult = await query("SELECT COUNT(*) as total FROM cosmetics");
+    const cosmeticAppearancesCountResult = await query("SELECT COUNT(*) as total FROM cosmetic_shop_appearances");
+    const dailyShopSnapshotsCountResult = await query("SELECT COUNT(*) as total FROM daily_shop_snapshots");
 
     // Estadísticas por hora (últimas 24 horas)
     const hourlyResult = await query(
@@ -68,11 +80,31 @@ export async function GET() {
         callsBySource: callsBySourceResult.rows,
         errors: errorsResult.rows,
         recentCalls: recentCallsResult.rows,
-        hourlyStats: hourlyResult.rows.map((row) => ({
+        hourlyStats: hourlyResult.rows.map((row: { hour: string; total: string; avg_duration: string }) => ({
           hour: row.hour,
           total: parseInt(row.total, 10),
           avgDuration: parseFloat(row.avg_duration).toFixed(2),
         })),
+        snapshots: {
+          total: parseInt(snapshotsCountResult.rows[0].total, 10),
+          recent: recentSnapshotsResult.rows
+        },
+        shop: {
+          totalEntries: parseInt(shopHistoryCountResult.rows[0].total, 10),
+          cosmetics: parseInt(cosmeticsCountResult.rows[0].total, 10),
+          cosmeticAppearances: parseInt(cosmeticAppearancesCountResult.rows[0].total, 10),
+          dailySnapshots: parseInt(dailyShopSnapshotsCountResult.rows[0].total, 10)
+        },
+        progress: {
+          recent: await (async () => {
+            try {
+              return (await query("SELECT * FROM player_progress ORDER BY created_at DESC LIMIT 5")).rows;
+            } catch (e) {
+              console.warn("Table player_progress might not exist yet:", e);
+              return [];
+            }
+          })()
+        }
       },
     });
   } catch (error) {

@@ -181,6 +181,26 @@ Variables de entorno:
 - `KAFKA_TOPIC_API_CALLS`
 - `KAFKA_GROUP_ID`
 
+### 7. Outbox Producer (`miyu-producer`)
+
+```yaml
+Servicio: producer
+Build: producer/Dockerfile
+Dependencias: postgres, kafka
+```
+
+Implementa el **Outbox Pattern**. Lee eventos de la tabla `api_outbox` y los publica en Kafka de forma resiliente.
+
+### 8. ETL Transform Service (`miyu-etl`)
+
+```yaml
+Servicio: etl
+Build: etl/Dockerfile
+Dependencias: postgres, kafka, python
+```
+
+Servicio basado en **Python** que realiza transformaciones complejas. Calcula la progresión de los jugadores comparando snapshots históricos y generando métricas de mejora (deltas).
+
 ---
 
 ## Flujo de Datos

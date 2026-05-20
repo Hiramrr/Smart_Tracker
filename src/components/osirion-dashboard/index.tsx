@@ -12,6 +12,17 @@ import {
   Trophy,
   Users,
 } from "lucide-react";
+import {
+  AreaChart,
+  Area,
+  BarChart as ReBarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+} from "recharts";
 
 interface RankedMode {
   rankingType: string;
@@ -57,6 +68,27 @@ interface SearchHistory {
   timestamp: number;
 }
 
+interface TournamentPlacement {
+  eventId?: string | null;
+  eventWindowId?: string | null;
+  epicUsername?: string | null;
+  placement?: number | null;
+  points?: number | null;
+  eliminations?: number | null;
+  assists?: number | null;
+  avgPlacement?: number | null;
+  totalMatches?: number | null;
+  startTime?: number | string | null;
+  endTime?: number | string | null;
+  error?: string;
+}
+
+interface TournamentPlacementsData {
+  success: boolean;
+  tournamentsScanned?: number;
+  placements?: TournamentPlacement[];
+}
+
 type InputMethod = "keyboardmouse" | "gamepad" | "touch" | string;
 type GameMode = "p2" | "p10" | "p9" | string;
 const CANONICAL_GAME_MODES = ["solo", "duo", "trio", "squad", "ltm"] as const;
@@ -91,6 +123,36 @@ function formatGameModeTitle(mode: string) {
   return formatGameMode(mode).toUpperCase();
 }
 
+function formatNumber(value: number | string | null | undefined) {
+  if (value === null || value === undefined || value === "") return "—";
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed.toLocaleString("es-MX") : "—";
+}
+
+function formatPlacement(value: number | string | null | undefined) {
+  if (value === null || value === undefined || value === "") return "—";
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? `#${parsed.toLocaleString("es-MX")}` : "—";
+}
+
+function formatTournamentDate(value: number | string | null | undefined) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return "fecha n/d";
+  const millis = parsed > 10_000_000_000_000 ? parsed / 1000 : parsed;
+  return new Date(millis).toLocaleDateString("es-MX", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+function getEventLabel(placement: TournamentPlacement) {
+  const eventId = placement.eventId || "Torneo";
+  return eventId
+    .replace(/^epicgames_/i, "")
+    .replace(/_/g, " ");
+}
+
 export default function OsirionDashboard({
   initialPlayer,
   initialDisplayName,
@@ -104,6 +166,9 @@ export default function OsirionDashboard({
   const [isLoading, setIsLoading] = useState(false);
   const [statsData, setStatsData] = useState<StatsData | null>(null);
   const [rankedData, setRankedData] = useState<RankedData | null>(null);
+  const [tournamentData, setTournamentData] = useState<TournamentPlacementsData | null>(null);
+  const [tournamentsLoading, setTournamentsLoading] = useState(false);
+  const [tournamentsError, setTournamentsError] = useState("");
   const [currentTimeframe, setCurrentTimeframe] = useState<"season" | "lifetime">("season");
   const [showRawJson, setShowRawJson] = useState(false);
   const [currentAccountId, setCurrentAccountId] = useState<string | null>(null);
@@ -121,13 +186,18 @@ export default function OsirionDashboard({
   const [showHistory, setShowHistory] = useState(false);
   const [selectedInputMethod, setSelectedInputMethod] = useState<InputMethod | "all">("all");
   const [selectedGameMode, setSelectedGameMode] = useState<GameMode | "all">("all");
-  const [activeTab, setActiveTab] = useState<"overview" | "modes" | "ranked">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "modes" | "ranked" | "tournaments" | "progreso">("overview");
+  const [progressData, setProgressData] = useState<any[]>([]);
+  const [rankedMode, setRankedMode] = useState<"br" | "reload">("br");
 
   const fetchStats = useCallback(async (accountId: string, displayName: string, timeframe: "season" | "lifetime") => {
     setLoadingMsg("obteniendo estadisticas...");
     setIsLoading(true);
     setStatsData(null);
     setRankedData(null);
+    setTournamentData(null);
+    setTournamentsError("");
+    setTournamentsLoading(true);
 
     try {
       const statsRes = await fetch(`/api/osirion?action=stats&accountId=${encodeURIComponent(accountId)}&timeframe=${timeframe}`);
@@ -144,8 +214,33 @@ export default function OsirionDashboard({
       }
 
       setRankedData(rankedJson);
+
+      try {
+        const tournamentRes = await fetch(`/api/osirion?action=player-tournament-placements&accountId=${encodeURIComponent(accountId)}&limit=12`);
+        if (!tournamentRes.ok) throw new Error(`error en torneos: ${tournamentRes.status}`);
+        const tournamentJson: TournamentPlacementsData = await tournamentRes.json();
+        setTournamentData(tournamentJson);
+      } catch (err) {
+        console.warn("No se pudieron obtener los torneos del jugador:", err);
+        setTournamentsError(getErrorMessage(err).toLowerCase());
+        setTournamentData({ success: false, placements: [] });
+      } finally {
+        setTournamentsLoading(false);
+      }
+
+      // Fetch progress (ETL analysis — llama directo a fortnite-api.com)
+      try {
+        const progRes = await fetch(`/api/player/analysis/${encodeURIComponent(accountId)}`);
+        if (progRes.ok) {
+          const progJson = await progRes.json();
+          if (progJson.success) setProgressData(progJson.progress);
+        }
+      } catch (err) {
+        console.warn("No se pudo obtener el análisis ETL:", err);
+      }
     } catch (err: unknown) {
       setErrorMsg(getErrorMessage(err).toLowerCase());
+      setTournamentsLoading(false);
     } finally {
       setIsLoading(false);
       setLoadingMsg("");
@@ -162,6 +257,8 @@ export default function OsirionDashboard({
     setIsLoading(true);
     setStatsData(null);
     setRankedData(null);
+    setTournamentData(null);
+    setTournamentsError("");
     setShowHistory(false);
 
     try {
@@ -369,6 +466,39 @@ export default function OsirionDashboard({
     return breakdown;
   }, [statsData]);
 
+  const tournamentPlacements = useMemo(() => {
+    return (tournamentData?.placements || [])
+      .filter((placement) => !placement.error)
+      .sort((a, b) => {
+        const endA = Number(a.endTime || a.startTime || 0);
+        const endB = Number(b.endTime || b.startTime || 0);
+        return endB - endA;
+      });
+  }, [tournamentData]);
+
+  const tournamentSummary = useMemo(() => {
+    const rankedPlacements = tournamentPlacements
+      .map((placement) => Number(placement.placement))
+      .filter((placement) => Number.isFinite(placement) && placement > 0);
+
+    const points = tournamentPlacements
+      .map((placement) => Number(placement.points))
+      .filter((value) => Number.isFinite(value));
+
+    return {
+      events: tournamentPlacements.length,
+      best: rankedPlacements.length ? Math.min(...rankedPlacements) : null,
+      average: rankedPlacements.length
+        ? Math.round(rankedPlacements.reduce((sum, placement) => sum + placement, 0) / rankedPlacements.length)
+        : null,
+      top100: rankedPlacements.filter((placement) => placement <= 100).length,
+      top1000: rankedPlacements.filter((placement) => placement <= 1000).length,
+      avgPoints: points.length
+        ? Math.round(points.reduce((sum, value) => sum + value, 0) / points.length)
+        : null,
+    };
+  }, [tournamentPlacements]);
+
   const sourceLabel = statsData?.source === "tracker"
     ? "fortnite tracker"
     : statsData?.source === "fortnite-api"
@@ -463,6 +593,14 @@ export default function OsirionDashboard({
             <section>
               <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
                 <div className="flex flex-wrap gap-3">
+                  <TabButton active={activeTab === "overview"} onClick={() => setActiveTab("overview")}>VISTA GENERAL</TabButton>
+                  <TabButton active={activeTab === "modes"} onClick={() => setActiveTab("modes")}>POR MODOS</TabButton>
+                  <TabButton active={activeTab === "ranked"} onClick={() => setActiveTab("ranked")}>RANKED</TabButton>
+                  <TabButton active={activeTab === "tournaments"} onClick={() => setActiveTab("tournaments")}>TORNEOS</TabButton>
+                  <TabButton active={activeTab === "progreso"} onClick={() => setActiveTab("progreso")}>MEJORA (ETL)</TabButton>
+                </div>
+
+                <div className="flex flex-wrap gap-3">
                   <SegmentButton active={currentTimeframe === "season"} onClick={() => setTimeframe("season")}>
                     TEMP ACTUAL
                   </SegmentButton>
@@ -470,27 +608,13 @@ export default function OsirionDashboard({
                     TODAS LAS TEMP
                   </SegmentButton>
                 </div>
+              </div>
 
+              <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
                 <div className="font-mono text-xs text-miyu-text-muted">
                   {statsData?.seasonLevels?.[0]?.level ? `[ nivel: ${statsData.seasonLevels[0].level} ] ` : ""}
                   [ {currentTimeframe === "season" ? "temporada actual" : "todas las temporadas"} ] [ {sourceLabel} ]
                 </div>
-              </div>
-
-              <div className="mb-6 flex gap-8 border-b border-miyu-border">
-                {(["overview", "modes", "ranked"] as const).map((tab) => (
-                  <button
-                    key={tab}
-                    onClick={() => setActiveTab(tab)}
-                    className={`rounded-t-md border-b-2 bg-miyu-btn px-4 py-3 text-xs font-bold uppercase tracking-wide transition-colors hover:bg-miyu-btn-hover ${
-                      activeTab === tab
-                        ? "border-miyu-text text-miyu-text"
-                        : "border-transparent text-miyu-text-muted hover:text-miyu-text"
-                    }`}
-                  >
-                    {tab === "overview" ? "General" : tab === "modes" ? "Modos" : "Ranked"}
-                  </button>
-                ))}
               </div>
 
               {activeTab === "overview" && (
@@ -536,10 +660,21 @@ export default function OsirionDashboard({
 
                   <div className="mb-3 flex items-center justify-between">
                     <h2 className="font-mono text-sm font-bold uppercase tracking-wide">Metricas detalladas</h2>
-                    <button onClick={() => setShowRawJson((v) => !v)} className="rounded bg-miyu-btn px-2 py-1 font-mono text-xs text-miyu-text hover:bg-miyu-btn-hover">
-                      [ver .json]
+                    <button
+                      onClick={() => setShowRawJson((v) => !v)}
+                      className="rounded bg-miyu-btn px-2 py-1 font-mono text-[10px] text-miyu-text hover:bg-miyu-btn-hover border border-miyu-border transition-colors"
+                    >
+                      {showRawJson ? "[ ocultar .json ]" : "[ ver .json ]"}
                     </button>
                   </div>
+
+                  {showRawJson && (
+                    <div className="mb-6 overflow-hidden rounded-md border border-miyu-border bg-black/80 p-4 font-mono text-[10px] text-emerald-400">
+                      <pre className="max-h-[300px] overflow-auto whitespace-pre-wrap">
+                        {JSON.stringify(statsData, null, 2)}
+                      </pre>
+                    </div>
+                  )}
 
                   <div className="grid gap-4 xl:grid-cols-2">
                     <DetailPanel>
@@ -553,16 +688,382 @@ export default function OsirionDashboard({
                       <DetailBox title="Puntuacion" subtitle={`+${filteredStats.avgScore} xp avg`} rightText={`${filteredStats.totalScore.toLocaleString("es-MX")} pts totales`} icon="star" />
                     </DetailPanel>
                   </div>
-
-                  {showRawJson && (
-                    <div className="mt-6 max-h-96 overflow-auto rounded-md border border-miyu-border bg-white/40 p-4">
-                      <pre className="font-mono text-xs text-miyu-text-muted">
-                        {JSON.stringify({ stats: statsData, ranked: rankedData }, null, 2)}
-                      </pre>
-                    </div>
-                  )}
                 </>
               )}
+
+          {activeTab === "tournaments" && (
+            <div className="space-y-5">
+              <div className="rounded-md border border-miyu-border bg-white/20 p-6">
+                <div className="mb-5 flex flex-wrap items-center justify-between gap-4">
+                  <div>
+                    <h3 className="font-mono text-lg font-bold uppercase tracking-tight">Torneos jugados</h3>
+                    <p className="mt-1 text-sm text-miyu-text-muted">
+                      Placements detectados por ventana de torneo usando Osirion.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 rounded-md border border-miyu-border bg-white/35 px-3 py-2 font-mono text-xs text-miyu-text-muted">
+                    <Trophy className="h-4 w-4 text-miyu-text" />
+                    {tournamentsLoading ? "cargando..." : `${tournamentSummary.events} resultados`}
+                  </div>
+                </div>
+
+                {tournamentsError && (
+                  <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 font-mono text-xs text-amber-700">
+                    {tournamentsError}
+                  </div>
+                )}
+
+                <div className="mb-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+                  <MiniStat label="Eventos" value={tournamentsLoading ? "..." : tournamentSummary.events} />
+                  <MiniStat label="Mejor top" value={tournamentsLoading ? "..." : formatPlacement(tournamentSummary.best)} />
+                  <MiniStat label="Promedio" value={tournamentsLoading ? "..." : formatPlacement(tournamentSummary.average)} />
+                  <MiniStat label="Top 100" value={tournamentsLoading ? "..." : tournamentSummary.top100} />
+                  <MiniStat label="Top 1000" value={tournamentsLoading ? "..." : tournamentSummary.top1000} />
+                </div>
+
+                {tournamentsLoading ? (
+                  <div className="rounded-md border border-miyu-border bg-white/20 px-4 py-8 text-center font-mono text-xs uppercase tracking-widest text-miyu-text-muted animate-pulse">
+                    Buscando historial competitivo...
+                  </div>
+                ) : tournamentPlacements.length > 0 ? (
+                  <div className="overflow-hidden rounded-md border border-miyu-border">
+                    <div className="grid grid-cols-[minmax(220px,1.6fr)_90px_90px_100px_110px] gap-3 border-b border-miyu-border bg-white/30 px-4 py-3 font-mono text-[10px] font-bold uppercase tracking-widest text-miyu-text-muted max-lg:hidden">
+                      <span>Torneo</span>
+                      <span>Top</span>
+                      <span>Puntos</span>
+                      <span>Kills</span>
+                      <span>Fecha</span>
+                    </div>
+                    <div className="divide-y divide-miyu-border">
+                      {tournamentPlacements.map((placement, index) => (
+                        <div
+                          key={`${placement.eventWindowId || placement.eventId || "tournament"}-${index}`}
+                          className="grid gap-3 bg-white/10 px-4 py-4 hover:bg-white/25 lg:grid-cols-[minmax(220px,1.6fr)_90px_90px_100px_110px] lg:items-center"
+                        >
+                          <div className="min-w-0">
+                            <div className="truncate font-mono text-sm font-bold text-miyu-text">
+                              {getEventLabel(placement)}
+                            </div>
+                            <div className="mt-1 truncate font-mono text-[10px] text-miyu-text-muted">
+                              {placement.eventWindowId || "sin ventana"}
+                            </div>
+                          </div>
+                          <TournamentCell label="Top" value={formatPlacement(placement.placement)} strong />
+                          <TournamentCell label="Puntos" value={formatNumber(placement.points)} />
+                          <TournamentCell label="Kills" value={formatNumber(placement.eliminations)} />
+                          <TournamentCell label="Fecha" value={formatTournamentDate(placement.endTime || placement.startTime)} />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="rounded-md border border-miyu-border bg-white/20 px-4 py-10 text-center">
+                    <div className="font-mono text-sm text-miyu-text">sin torneos encontrados</div>
+                    <div className="mt-2 text-xs text-miyu-text-muted">
+                      No hay placements disponibles para este jugador en las ventanas consultadas.
+                    </div>
+                  </div>
+                )}
+
+                {tournamentSummary.avgPoints !== null && (
+                  <div className="mt-4 font-mono text-xs text-miyu-text-muted">
+                    promedio de puntos por torneo: <span className="font-bold text-miyu-text">{formatNumber(tournamentSummary.avgPoints)}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {activeTab === "progreso" && (
+            <div className="space-y-6">
+               <div className="rounded-md border border-miyu-border bg-white/20 p-6">
+                 <h3 className="text-lg font-bold mb-4 font-mono uppercase tracking-tighter">Análisis de Rendimiento</h3>
+                 <p className="text-sm text-miyu-text-muted mb-8 max-w-2xl">
+                   Análisis detallado usando datos de fortnite-api.com. Desglose por modo de juego, clasificación competitiva y predicción de tendencia.
+                 </p>
+
+                 {progressData.length > 0 ? (
+                   <div className="space-y-6">
+                      {/* ── Row 1: Classification + Predictions ── */}
+                      <div className="grid gap-4 md:grid-cols-3">
+                         {/* Skill Category — 6 tiers */}
+                         {(() => {
+                           const skillItem = progressData.find((m: any) => m.metric_name === 'skill_category');
+                           if (!skillItem) return null;
+                           const val = parseFloat(skillItem.metric_value);
+                           const tier = skillItem.period_start || '';
+                           const tiers: Record<number, { label: string; color: string; icon: string }> = {
+                             0: { label: 'PRINCIPIANTE', color: 'text-slate-600 bg-slate-50 border-slate-200', icon: '🌱' },
+                             1: { label: 'CASUAL', color: 'text-blue-600 bg-blue-50 border-blue-200', icon: '🎮' },
+                             2: { label: 'INTERMEDIO', color: 'text-cyan-700 bg-cyan-50 border-cyan-200', icon: '⚡' },
+                             3: { label: 'AVANZADO', color: 'text-amber-700 bg-amber-50 border-amber-200', icon: '🔥' },
+                             4: { label: 'COMPETITIVO', color: 'text-purple-700 bg-purple-50 border-purple-200', icon: '💎' },
+                             5: { label: 'ELITE / PRO', color: 'text-emerald-700 bg-emerald-50 border-emerald-200', icon: '🏆' },
+                           };
+                           const t = tiers[val] || tiers[0];
+                           return (
+                             <div className={`p-4 rounded-xl border ${t.color} md:col-span-1`}>
+                               <div className="flex items-center justify-between mb-2">
+                                 <p className="text-[10px] uppercase font-bold tracking-widest opacity-70">Clasificación</p>
+                                 {tier && <span className="text-xs font-bold font-mono opacity-60">Tier {tier}</span>}
+                               </div>
+                               <p className="text-lg font-bold font-mono flex items-center gap-2">
+                                 <span>{t.icon}</span> {t.label}
+                               </p>
+                             </div>
+                           );
+                         })()}
+
+                         {/* Predicted KD */}
+                         {(() => {
+                           const predKd = progressData.find((m: any) => m.metric_name === 'predicted_kd_next');
+                           if (!predKd) return null;
+                           return (
+                             <div className="p-4 rounded-xl border border-miyu-border bg-white/40">
+                               <p className="text-[10px] uppercase font-bold mb-2 tracking-widest text-miyu-text-muted">K/D Predicho</p>
+                               <p className="text-lg font-bold font-mono text-miyu-text">
+                                 {parseFloat(predKd.metric_value).toFixed(2)}
+                               </p>
+                               <p className={`text-[10px] font-bold font-mono mt-1 ${parseFloat(predKd.delta) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                                 {parseFloat(predKd.delta) >= 0 ? '↑' : '↓'} {parseFloat(predKd.delta) >= 0 ? 'positiva' : 'negativa'}
+                               </p>
+                             </div>
+                           );
+                         })()}
+
+                         {/* Predicted WR */}
+                         {(() => {
+                           const predWr = progressData.find((m: any) => m.metric_name === 'predicted_wr_next');
+                           if (!predWr) return null;
+                           return (
+                             <div className="p-4 rounded-xl border border-miyu-border bg-white/40">
+                               <p className="text-[10px] uppercase font-bold mb-2 tracking-widest text-miyu-text-muted">Win Rate Predicho</p>
+                               <p className="text-lg font-bold font-mono text-miyu-text">
+                                 {parseFloat(predWr.metric_value).toFixed(1)}%
+                               </p>
+                               <p className={`text-[10px] font-bold font-mono mt-1 ${parseFloat(predWr.delta) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                                 {parseFloat(predWr.delta) >= 0 ? '↑' : '↓'} {parseFloat(predWr.delta) >= 0 ? 'positiva' : 'negativa'}
+                               </p>
+                             </div>
+                           );
+                         })()}
+                      </div>
+
+                      {/* ── Row 2: Per-Mode Bar Charts (KD + WR) ── */}
+                      <div className="grid gap-6 md:grid-cols-2">
+                         <div className="bg-white/40 border border-miyu-border rounded-xl p-6">
+                            <h4 className="text-xs font-bold text-miyu-accent uppercase mb-4 tracking-widest">K/D por Modo de Juego</h4>
+                            <div className="h-[220px]">
+                               <ResponsiveContainer width="100%" height="100%">
+                                  <ReBarChart data={progressData.filter((m: any) => m.metric_name === 'kd_season')} barGap={2}>
+                                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#dfd8cc" />
+                                     <XAxis dataKey="period_start" fontSize={8} tickLine={false} axisLine={false} angle={-35} textAnchor="end" height={50} />
+                                     <YAxis fontSize={9} tickLine={false} axisLine={false} domain={[0, 'auto']} />
+                                     <Tooltip contentStyle={{ fontSize: '10px', borderRadius: '8px', border: '1px solid #dfd8cc' }} />
+                                     <Bar dataKey="metric_value" name="K/D" fill="#8d72dc" radius={[4, 4, 0, 0]} />
+                                  </ReBarChart>
+                               </ResponsiveContainer>
+                            </div>
+                         </div>
+
+                         <div className="bg-white/40 border border-miyu-border rounded-xl p-6">
+                            <h4 className="text-xs font-bold text-miyu-accent uppercase mb-4 tracking-widest">Win Rate por Modo de Juego</h4>
+                            <div className="h-[220px]">
+                               <ResponsiveContainer width="100%" height="100%">
+                                  <ReBarChart data={progressData.filter((m: any) => m.metric_name === 'win_rate_season')} barGap={2}>
+                                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#dfd8cc" />
+                                     <XAxis dataKey="period_start" fontSize={8} tickLine={false} axisLine={false} angle={-35} textAnchor="end" height={50} />
+                                     <YAxis fontSize={9} tickLine={false} axisLine={false} domain={[0, 'auto']} />
+                                     <Tooltip contentStyle={{ fontSize: '10px', borderRadius: '8px', border: '1px solid #dfd8cc' }} />
+                                     <Bar dataKey="metric_value" name="Win Rate %" fill="#22c55e" radius={[4, 4, 0, 0]} />
+                                  </ReBarChart>
+                               </ResponsiveContainer>
+                            </div>
+                         </div>
+                      </div>
+
+                      {/* ── Row 3: Mode Detail Table ── */}
+                      {(() => {
+                        const details = progressData.filter((m: any) => m.metric_name === 'mode_detail');
+                        if (!details.length) return null;
+                        return (
+                          <div className="bg-white/40 border border-miyu-border rounded-xl p-6">
+                             <h4 className="text-xs font-bold text-miyu-accent uppercase mb-4 tracking-widest">Desglose Detallado por Modo</h4>
+                             <div className="overflow-x-auto">
+                                <table className="w-full text-xs font-mono">
+                                   <thead>
+                                      <tr className="border-b border-miyu-border text-left text-miyu-text-muted uppercase tracking-wider">
+                                         <th className="py-2 pr-3">Modo</th>
+                                         <th className="py-2 pr-3 text-right">K/D</th>
+                                         <th className="py-2 pr-3 text-right">Win Rate</th>
+                                         <th className="py-2 pr-3 text-right">Kills</th>
+                                         <th className="py-2 pr-3 text-right">Wins</th>
+                                         <th className="py-2 pr-3 text-right">Partidas</th>
+                                         <th className="py-2 text-right">K/Partida</th>
+                                      </tr>
+                                   </thead>
+                                   <tbody>
+                                      {details.map((d: any, i: number) => (
+                                        <tr key={i} className={`border-b border-miyu-border/30 ${d.period_start?.includes('Overall') ? 'font-bold bg-miyu-accent/5' : ''}`}>
+                                           <td className="py-2.5 pr-3 text-miyu-text">{d.period_start}</td>
+                                           <td className="py-2.5 pr-3 text-right font-bold">{parseFloat(d.metric_value).toFixed(2)}</td>
+                                           <td className="py-2.5 pr-3 text-right">{parseFloat(d.delta).toFixed(1)}%</td>
+                                           <td className="py-2.5 pr-3 text-right">{(d._extra?.kills || 0).toLocaleString()}</td>
+                                           <td className="py-2.5 pr-3 text-right">{(d._extra?.wins || 0).toLocaleString()}</td>
+                                           <td className="py-2.5 pr-3 text-right">{(d._extra?.matches || 0).toLocaleString()}</td>
+                                           <td className="py-2.5 text-right">{(d._extra?.killsPerMatch || 0).toFixed(1)}</td>
+                                        </tr>
+                                      ))}
+                                   </tbody>
+                                </table>
+                             </div>
+                          </div>
+                        );
+                      })()}
+
+                      {/* ── Row 4: Historical Snapshots (if any) ── */}
+                      {(() => {
+                        const snapshotKd = progressData.filter((m: any) => m.metric_name === 'snapshot_kd');
+                        const snapshotWr = progressData.filter((m: any) => m.metric_name === 'snapshot_wr');
+                        if (snapshotKd.length < 2) return null;
+                        return (
+                          <div className="grid gap-6 md:grid-cols-2">
+                             <div className="bg-white/40 border border-miyu-border rounded-xl p-6">
+                                <h4 className="text-xs font-bold text-miyu-accent uppercase mb-4 tracking-widest">Evolución K/D (Historial)</h4>
+                                <div className="h-[180px]">
+                                   <ResponsiveContainer width="100%" height="100%">
+                                      <AreaChart data={snapshotKd}>
+                                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#dfd8cc" />
+                                         <Area type="monotone" dataKey="metric_value" stroke="#8d72dc" fill="#8d72dc" fillOpacity={0.1} strokeWidth={2} />
+                                         <XAxis dataKey="period_start" fontSize={9} tickLine={false} axisLine={false} />
+                                         <YAxis fontSize={9} tickLine={false} axisLine={false} domain={['auto', 'auto']} />
+                                         <Tooltip contentStyle={{ fontSize: '10px', borderRadius: '8px', border: '1px solid #dfd8cc' }} />
+                                      </AreaChart>
+                                   </ResponsiveContainer>
+                                </div>
+                             </div>
+                             <div className="bg-white/40 border border-miyu-border rounded-xl p-6">
+                                <h4 className="text-xs font-bold text-miyu-accent uppercase mb-4 tracking-widest">Evolución Win Rate (Historial)</h4>
+                                <div className="h-[180px]">
+                                   <ResponsiveContainer width="100%" height="100%">
+                                      <AreaChart data={snapshotWr}>
+                                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#dfd8cc" />
+                                         <Area type="monotone" dataKey="metric_value" stroke="#22c55e" fill="#22c55e" fillOpacity={0.08} strokeWidth={2} />
+                                         <XAxis dataKey="period_start" fontSize={9} tickLine={false} axisLine={false} />
+                                         <YAxis fontSize={9} tickLine={false} axisLine={false} domain={['auto', 'auto']} />
+                                         <Tooltip contentStyle={{ fontSize: '10px', borderRadius: '8px', border: '1px solid #dfd8cc' }} />
+                                      </AreaChart>
+                                   </ResponsiveContainer>
+                                </div>
+                             </div>
+                          </div>
+                        );
+                      })()}
+
+                      {/* ── Row 5: Ranked History + Rank Prediction ── */}
+                      {(() => {
+                        const rankedBR = progressData.filter((m: any) => m.metric_name === 'ranked_history');
+                        const rankedReload = progressData.filter((m: any) => m.metric_name === 'ranked_history_reload');
+                        const ranked = rankedMode === 'br' ? rankedBR : rankedReload;
+                        const rankPred = progressData.find((m: any) => m.metric_name === 'predicted_rank');
+                        if (!rankedBR.length && !rankedReload.length) return null;
+
+                        const RANK_LABELS: Record<number, string> = { 1: "Bronce", 2: "Plata", 3: "Oro", 4: "Platino", 5: "Diamante", 6: "Elite", 7: "Campeón", 8: "Unreal" };
+
+                        return (
+                          <div className="space-y-4">
+                             {/* Toggle BR / Reload */}
+                             <div className="flex items-center gap-2">
+                                <button
+                                  onClick={() => setRankedMode('br')}
+                                  className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all ${rankedMode === 'br' ? 'bg-miyu-accent text-white' : 'bg-white/40 border border-miyu-border text-miyu-text-muted hover:bg-white/60'}`}
+                                >Battle Royale</button>
+                                <button
+                                  onClick={() => setRankedMode('reload')}
+                                  className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all ${rankedMode === 'reload' ? 'bg-miyu-accent text-white' : 'bg-white/40 border border-miyu-border text-miyu-text-muted hover:bg-white/60'}`}
+                                >Reload</button>
+                             </div>
+
+                             {ranked.length > 0 ? (
+                               <div className="grid gap-4 md:grid-cols-3">
+                                  {/* Ranked chart */}
+                                  <div className="bg-white/40 border border-miyu-border rounded-xl p-6 md:col-span-2">
+                                     <h4 className="text-xs font-bold text-miyu-accent uppercase mb-4 tracking-widest">
+                                       Progresión de Rango — {rankedMode === 'br' ? 'Battle Royale' : 'Reload'}
+                                     </h4>
+                                     <div className="h-[220px]">
+                                        <ResponsiveContainer width="100%" height="100%">
+                                           <ReBarChart data={ranked}>
+                                              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#dfd8cc" />
+                                              <XAxis dataKey="period_start" fontSize={9} tickLine={false} axisLine={false} />
+                                              <YAxis fontSize={9} tickLine={false} axisLine={false} domain={[0, 8]} tickFormatter={(v: number) => RANK_LABELS[v] || ""} />
+                                              <Tooltip
+                                                contentStyle={{ fontSize: '10px', borderRadius: '8px', border: '1px solid #dfd8cc' }}
+                                                formatter={(value: any, _name: any, props: any) => {
+                                                  const d = props.payload;
+                                                  return [`${d._extra?.highestRank || RANK_LABELS[value as number] || value}${d._extra?.globalRanking ? ` (#${d._extra.globalRanking})` : ''}`, 'Rango Más Alto'];
+                                                }}
+                                              />
+                                              <Bar dataKey="metric_value" name="Rango" radius={[4, 4, 0, 0]}
+                                                fill={rankedMode === 'br' ? '#8d72dc' : '#e67e22'}
+                                              />
+                                           </ReBarChart>
+                                        </ResponsiveContainer>
+                                     </div>
+                                     {/* Rank legend */}
+                                     <div className="flex flex-wrap gap-2 mt-3">
+                                        {ranked.map((r: any, i: number) => (
+                                          <span key={i} className="text-[9px] font-mono px-2 py-0.5 rounded border border-miyu-border/50 bg-white/60">
+                                            {r.period_start}: <span className="font-bold">{r._extra?.highestRank || r._extra?.currentRank}</span>
+                                            {r._extra?.globalRanking ? ` #${r._extra.globalRanking}` : ''}
+                                          </span>
+                                        ))}
+                                     </div>
+                                  </div>
+
+                                  {/* Rank prediction + summary */}
+                                  <div className="space-y-4">
+                                     {rankPred && rankedMode === 'br' && (
+                                       <div className="p-4 rounded-xl border border-purple-200 bg-purple-50">
+                                          <p className="text-[10px] uppercase font-bold mb-2 tracking-widest text-purple-600">Rango Predicho (Próx. Temp)</p>
+                                          <p className="text-xl font-bold font-mono text-purple-800">{rankPred.period_start}</p>
+                                          <div className="mt-2 flex items-center gap-1.5">
+                                             <span className={`inline-block w-1.5 h-1.5 rounded-full ${rankPred._extra?.confidence === 'alta' ? 'bg-emerald-500' : rankPred._extra?.confidence === 'media' ? 'bg-amber-500' : 'bg-red-500'}`}></span>
+                                             <span className="text-[10px] font-mono text-purple-600">Confianza: {rankPred._extra?.confidence}</span>
+                                          </div>
+                                          <p className="text-[10px] text-purple-700 mt-2 leading-relaxed">{rankPred._extra?.reasoning}</p>
+                                       </div>
+                                     )}
+                                     <div className="p-4 rounded-xl border border-miyu-border bg-white/40">
+                                        <p className="text-[10px] uppercase font-bold mb-1 tracking-widest text-miyu-text-muted">Temporadas Registradas</p>
+                                        <p className="text-2xl font-bold font-mono">{ranked.length}</p>
+                                        <p className="text-[10px] text-miyu-text-muted mt-1">
+                                          Último: <span className="font-bold">{ranked[ranked.length - 1]._extra?.highestRank || ranked[ranked.length - 1]._extra?.currentRank}</span>
+                                        </p>
+                                     </div>
+                                  </div>
+                               </div>
+                             ) : (
+                               <div className="p-6 rounded-xl border border-miyu-border/50 bg-white/20 text-center">
+                                  <p className="text-xs text-miyu-text-muted font-mono">No hay datos de ranked {rankedMode === 'br' ? 'Battle Royale' : 'Reload'} para este jugador.</p>
+                               </div>
+                             )}
+                          </div>
+                        );
+                      })()}
+                   </div>
+                 ) : (
+                   <div className="flex flex-col items-center justify-center py-20 text-center">
+                      <Clock3 className="w-12 h-12 text-miyu-border mb-4" />
+                      <p className="text-miyu-text-muted text-sm font-mono uppercase tracking-widest">Cargando análisis...</p>
+                      <p className="text-xs text-miyu-text-muted mt-2 max-w-xs">
+                        Busca un jugador para obtener su análisis de rendimiento detallado.
+                      </p>
+                   </div>
+                 )}
+               </div>
+            </div>
+          )}
 
           {activeTab === "modes" && (
             <div className="space-y-4">
@@ -765,6 +1266,30 @@ function LinklessMobileNav() {
   );
 }
 
+function TabButton({
+  active,
+  children,
+  onClick,
+}: {
+  active: boolean;
+  children: React.ReactNode;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`border-b-2 px-1 pb-4 font-mono text-sm font-bold transition-all ${
+        active
+          ? "border-miyu-text text-miyu-text"
+          : "border-transparent text-miyu-text-muted hover:border-miyu-border hover:text-miyu-text"
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
 function SegmentButton({
   active,
   children,
@@ -811,7 +1336,6 @@ function DetailPanel({ children }: { children: React.ReactNode }) {
 }
 
 function RankIcon({ rank, size = 40 }: { rank: string; size?: number }) {
-  const rankName = rank.toLowerCase();
   const positions: Record<string, { row: number; col: number; label: string }> = {
     bronze: { row: 1, col: 0, label: "Bronze" },
     silver: { row: 1, col: 1, label: "Silver" },
@@ -822,7 +1346,7 @@ function RankIcon({ rank, size = 40 }: { rank: string; size?: number }) {
     champion: { row: 0, col: 2, label: "Champion" },
     unreal: { row: 0, col: 3, label: "Unreal" },
   };
-  const key = Object.keys(positions).find((name) => rankName.includes(name));
+  const key = getRankIconKey(rank);
   if (!key) return null;
 
   const icon = positions[key];
@@ -840,6 +1364,56 @@ function RankIcon({ rank, size = 40 }: { rank: string; size?: number }) {
         backgroundPosition: `-${icon.col * size}px -${icon.row * size}px`,
       }}
     />
+  );
+}
+
+function getRankIconKey(rank: string) {
+  const aliases: Record<string, string> = {
+    bronze: "bronze",
+    bronce: "bronze",
+    silver: "silver",
+    plata: "silver",
+    gold: "gold",
+    oro: "gold",
+    platinum: "platinum",
+    platino: "platinum",
+    diamond: "diamond",
+    diamante: "diamond",
+    elite: "elite",
+    champion: "champion",
+    campeon: "champion",
+    as: "champion",
+    ace: "champion",
+    unreal: "unreal",
+  };
+  const rankName = normalizeRankName(rank);
+  const tokens = rankName.split(/[^a-z0-9]+/).filter(Boolean);
+  const tokenMatch = tokens.map((token) => aliases[token]).find(Boolean);
+  if (tokenMatch) return tokenMatch;
+
+  return Object.entries(aliases).find(([alias]) => alias.length > 2 && rankName.includes(alias))?.[1] || null;
+}
+
+function normalizeRankName(rank: string) {
+  return rank
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
+function ProgressCircle({ label, value, color }: { label: string; value: string; color: string }) {
+  const colorMap: any = {
+    emerald: "text-emerald-600 bg-emerald-50",
+    blue: "text-blue-600 bg-blue-50",
+    purple: "text-miyu-accent bg-miyu-accent-light",
+  };
+  return (
+    <div className="flex items-center justify-between">
+      <span className="text-sm font-mono text-miyu-text-muted">{label}</span>
+      <span className={`px-2 py-1 rounded-full text-xs font-bold font-mono ${colorMap[color] || colorMap.purple}`}>
+        {value}
+      </span>
+    </div>
   );
 }
 
@@ -870,6 +1444,17 @@ function MiniStat({ label, value }: { label: string; value: string | number }) {
     <div className="rounded-md border border-miyu-border bg-white/20 p-5">
       <div className="mb-2 font-mono text-xs uppercase tracking-wide text-miyu-text-muted">{label}</div>
       <div className="font-mono text-lg font-bold text-miyu-text">{value}</div>
+    </div>
+  );
+}
+
+function TournamentCell({ label, value, strong = false }: { label: string; value: string; strong?: boolean }) {
+  return (
+    <div className="flex items-center justify-between gap-4 lg:block">
+      <span className="font-mono text-[10px] uppercase tracking-widest text-miyu-text-muted lg:hidden">{label}</span>
+      <span className={`font-mono text-sm ${strong ? "font-bold text-miyu-text" : "font-medium text-miyu-text"}`}>
+        {value}
+      </span>
     </div>
   );
 }

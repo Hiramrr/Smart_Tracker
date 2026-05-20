@@ -143,6 +143,10 @@ export function getCacheTtl(action: string): number {
       return 60; // 1 hora (tienda cambia cada 24h)
     case "tournaments":
       return 60 * 6; // 6 horas
+    case "player-tournament-placements":
+      return 60 * 12; // 12 horas (resultados históricos cambian poco)
+    case "tournament-player-stats":
+      return 60 * 6; // 6 horas
     case "leaderboard":
       return 30; // 30 minutos
     default:

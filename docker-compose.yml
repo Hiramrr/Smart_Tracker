@@ -141,6 +141,51 @@ services:
     networks:
       - miyu-network
 
+  # ==========================================
+  # Producer de Kafka (Outbox Pattern)
+  # ==========================================
+  producer:
+    build:
+      context: .
+      dockerfile: producer/Dockerfile
+    container_name: miyu-producer
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    environment:
+      # Base de datos
+      DATABASE_URL: postgres://${POSTGRES_USER:-miyu}:${POSTGRES_PASSWORD:-miyu_secret}@postgres:5432/${POSTGRES_DB:-miyu_datalake}
+      # Kafka
+      KAFKA_BROKER: kafka:29092
+      KAFKA_TOPIC_API_CALLS: api-calls
+    networks:
+      - miyu-network
+
+  # ==========================================
+  # Servicio ETL (Capa de Transformación en Python)
+  # ==========================================
+  etl:
+    build:
+      context: ./etl
+    container_name: miyu-etl
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    environment:
+      # Base de datos
+      DATABASE_URL: postgres://${POSTGRES_USER:-miyu}:${POSTGRES_PASSWORD:-miyu_secret}@postgres:5432/${POSTGRES_DB:-miyu_datalake}
+      # Kafka
+      KAFKA_BROKER: kafka:29092
+      KAFKA_TOPIC: api-calls
+    networks:
+      - miyu-network
+
 volumes:
   postgres_data:
     driver: local

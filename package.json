@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "consumer": "tsx consumer/index.ts",
+    "cosmetic:predict": "python3 etl/cosmetic_predictions.py",
     "docker:up": "docker-compose up --build",
     "docker:down": "docker-compose down -v"
   },
