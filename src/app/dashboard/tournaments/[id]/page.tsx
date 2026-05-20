@@ -187,16 +187,19 @@ function TournamentImage({ tournament, className }: { tournament: Tournament; cl
   if (!imageUrl) return <div className={`bg-miyu-surface ${className}`} />;
   const localUrl = `/api/tournament-image?eventId=${encodeURIComponent(tournament.eventId)}&type=square&url=${encodeURIComponent(imageUrl)}`;
   return (
-    <img
-      src={localUrl}
-      alt=""
-      className={`object-cover ${className}`}
-      onError={(e) => {
-        const image = e.target as HTMLImageElement;
-        if (image.src !== imageUrl) image.src = imageUrl;
-        else image.style.display = "none";
-      }}
-    />
+    <>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={localUrl}
+        alt=""
+        className={`object-cover ${className}`}
+        onError={(e) => {
+          const image = e.target as HTMLImageElement;
+          if (image.src !== imageUrl) image.src = imageUrl;
+          else image.style.display = "none";
+        }}
+      />
+    </>
   );
 }
 
@@ -286,14 +289,6 @@ function formatScoringRule(rule: ScoringRule) {
   return `${label}: ${tiers.length} niveles`;
 }
 
-function formatScoringRuleDetailed(rule: ScoringRule): string {
-  const tiers = rule.rewardTiers || [];
-  if (tiers.length === 0) return rule.trackedStat;
-  const first = tiers[0];
-  const suffix = first.multiplicative ? "x" : "pts";
-  return `${rule.trackedStat}: ${first.pointsEarned}${suffix} cada ${first.keyValue}`;
-}
-
 function getRequirements(window: EventWindow): string[] {
   const reqs: string[] = [];
   if (window.matchCap !== null && window.matchCap !== undefined) {
@@ -356,12 +351,6 @@ function getEntryAvgPlacement(entry: LeaderboardEntry): number | null {
   return Math.round(placements.reduce((a, b) => a + b, 0) / placements.length);
 }
 
-function getEntryTotalElims(entry: LeaderboardEntry) {
-  return entry.sessionHistory.reduce((total, session) => {
-    return total + (getTrackedStat(session.trackedStats, "TEAM_ELIMS_STAT_INDEX", "kills", "eliminations") || 0);
-  }, 0);
-}
-
 function getPreferredStatKeys(entry: LeaderboardEntry | undefined) {
   const stats = entry?.sessionHistory[0]?.trackedStats;
   if (!stats) return [];
@@ -376,17 +365,6 @@ function getPreferredStatKeys(entry: LeaderboardEntry | undefined) {
   ];
 
   return preferred.filter((key) => key in stats).slice(0, 3);
-}
-
-function getAllTrackedStatKeys(entry: LeaderboardEntry | undefined): string[] {
-  if (!entry || entry.sessionHistory.length === 0) return [];
-  const keys = new Set<string>();
-  for (const session of entry.sessionHistory) {
-    for (const key of Object.keys(session.trackedStats)) {
-      keys.add(key);
-    }
-  }
-  return Array.from(keys);
 }
 
 function formatStatValue(key: string, value: number): string {

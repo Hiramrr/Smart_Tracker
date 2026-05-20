@@ -40,7 +40,8 @@ export async function publishApiCall(event: ApiCallEvent): Promise<void> {
     const prod = await getProducer();
 
     // No incluir responseBody en Kafka para evitar mensajes muy grandes
-    const { responseBody, ...kafkaEvent } = event;
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { responseBody: _responseBody, ...kafkaEvent } = event;
 
     const message: Message = {
       key: event.action,

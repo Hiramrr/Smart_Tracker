@@ -12,6 +12,11 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Legacy files not part of the main project
+    "fort 2/**",
+    "producer/**",
+    "consumer/**",
+    "etl/**",
   ]),
 ]);
 

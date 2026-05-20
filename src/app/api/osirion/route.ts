@@ -42,6 +42,16 @@ function numberOrNull(value: unknown): number | null {
   return null;
 }
 
+function dateValue(value: unknown): number {
+  const numeric = numberOrNull(value);
+  if (numeric !== null) return numeric;
+  if (typeof value === "string") {
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  return 0;
+}
+
 function firstNumber(record: Record<string, unknown>, keys: string[]): number | null {
   for (const key of keys) {
     const value = numberOrNull(record[key]);
@@ -58,6 +68,42 @@ function getPlayers(data: unknown): Record<string, unknown>[] {
 function getTournaments(data: unknown): Record<string, unknown>[] {
   const record = asRecord(data);
   return asArray(record.tournaments || record.events || data);
+}
+
+function getTournamentWindows(data: unknown): Record<string, unknown>[] {
+  const tournaments = getTournaments(data);
+  const windows: Record<string, unknown>[] = [];
+
+  for (const tournament of tournaments) {
+    const eventId = typeof tournament.eventId === "string" ? tournament.eventId : null;
+    const displayData = asRecord(tournament.displayData);
+    const eventName =
+      displayData.longFormatTitle ||
+      displayData.titleLine1 ||
+      displayData.tournamentDisplayId ||
+      eventId;
+    const eventWindows = asArray(tournament.eventWindows);
+
+    if (eventWindows.length === 0) {
+      windows.push(tournament);
+      continue;
+    }
+
+    for (const eventWindow of eventWindows) {
+      const scoreLocations = asArray(eventWindow.scoreLocations);
+      const mainScoreLocation = scoreLocations.find((location) => location.isMain === true) || scoreLocations[0] || {};
+      windows.push({
+        ...eventWindow,
+        eventId,
+        eventName,
+        leaderboardEventId: mainScoreLocation.leaderboardEventId || eventId,
+        leaderboardEventWindowId: mainScoreLocation.leaderboardEventWindowId || eventWindow.eventWindowId,
+        rawTournament: tournament,
+      });
+    }
+  }
+
+  return windows;
 }
 
 function normalizeTournamentPlacement(
@@ -94,6 +140,101 @@ function normalizeTournamentPlacement(
   };
 }
 
+function normalizeLeaderboardPlacement(
+  entry: Record<string, unknown>,
+  tournament: Record<string, unknown>,
+  accountId: string
+) {
+  const players = asArray(entry.players);
+  const matchedPlayer = players.find((player) => {
+    const playerAccountId = typeof player.accountId === "string" ? player.accountId : "";
+    return playerAccountId.toLowerCase() === accountId.toLowerCase();
+  }) || players[0] || {};
+  const sessionHistory = asArray(entry.sessionHistory);
+  const totalEliminations = sessionHistory.reduce((sum, session) => {
+    const trackedStats = asRecord(session.trackedStats);
+    return sum + (
+      numberOrNull(trackedStats.TEAM_ELIMS_STAT_INDEX) ||
+      numberOrNull(trackedStats.ELIMS_STAT_INDEX) ||
+      numberOrNull(trackedStats.PLAYER_ELIMS_STAT_INDEX) ||
+      0
+    );
+  }, 0);
+  const placements = sessionHistory
+    .map((session) => numberOrNull(asRecord(session.trackedStats).PLACEMENT_STAT_INDEX))
+    .filter((value): value is number => value !== null && value > 0);
+  const leaderboardEventId = tournament.leaderboardEventId || tournament.eventId || entry.eventId || null;
+  const leaderboardEventWindowId = tournament.leaderboardEventWindowId || tournament.eventWindowId || entry.eventWindowId || null;
+
+  return {
+    accountId,
+    epicId: matchedPlayer.accountId || accountId,
+    epicUsername: matchedPlayer.username || null,
+    eventId: leaderboardEventId,
+    eventWindowId: leaderboardEventWindowId,
+    startTime: tournament.beginTime || tournament.startTime || null,
+    endTime: tournament.endTime || null,
+    totalMatches: sessionHistory.length || numberOrNull(tournament.totalMatches),
+    parsingProgress: numberOrNull(tournament.parsingProgress),
+    placement: firstNumber(entry, ["rank", "placement", "eventRank"]),
+    points: firstNumber(entry, ["pointsEarned", "points", "score", "totalPoints"]),
+    eliminations: totalEliminations || null,
+    assists: null,
+    avgPlacement: placements.length
+      ? placements.reduce((sum, placement) => sum + placement, 0) / placements.length
+      : null,
+    raw: entry,
+  };
+}
+
+async function fetchLeaderboardPlacement(
+  tournament: Record<string, unknown>,
+  accountId: string,
+  headers: Record<string, string>,
+  maxPages: number
+) {
+  const leaderboardEventId = typeof tournament.leaderboardEventId === "string"
+    ? tournament.leaderboardEventId
+    : typeof tournament.eventId === "string"
+      ? tournament.eventId
+      : "";
+  const leaderboardEventWindowId = typeof tournament.leaderboardEventWindowId === "string"
+    ? tournament.leaderboardEventWindowId
+    : typeof tournament.eventWindowId === "string"
+      ? tournament.eventWindowId
+      : "";
+  if (!leaderboardEventId || !leaderboardEventWindowId) return null;
+
+  const pages = await Promise.all(Array.from({ length: maxPages }, async (_, page) => {
+    const params = new URLSearchParams({
+      leaderboardEventId,
+      leaderboardEventWindowId,
+      page: String(page),
+    });
+    const result = await fetchJson(`${OSIRION_BASE}/tournaments/leaderboard?${params.toString()}`, headers);
+    if (!result.response.ok) return { page, entries: [], totalPages: 0 };
+
+    const leaderboard = asRecord(asRecord(result.data).leaderboard);
+    return {
+      page,
+      entries: asArray(leaderboard.entries),
+      totalPages: numberOrNull(leaderboard.totalPages),
+    };
+  }));
+
+  for (const pageResult of pages.sort((a, b) => a.page - b.page)) {
+    const entries = pageResult.entries;
+    if (entries.length === 0) continue;
+    const found = entries.find((entry) => asArray(entry.players).some((player) => {
+      const playerAccountId = typeof player.accountId === "string" ? player.accountId : "";
+      return playerAccountId.toLowerCase() === accountId.toLowerCase();
+    }));
+    if (found) return normalizeLeaderboardPlacement(found, tournament, accountId);
+  }
+
+  return null;
+}
+
 async function fetchJson(url: string, headers: Record<string, string>) {
   const response = await fetch(url, { headers });
   const data = await response.json();
@@ -128,12 +269,11 @@ async function fetchTournamentPages(opts: {
   const seen = new Set<string>();
   const tournaments: Record<string, unknown>[] = [];
   const addPage = (page: Record<string, unknown>[]) => {
-    for (const tournament of page) {
+    for (const tournament of getTournamentWindows(page)) {
       const eventWindowId = typeof tournament.eventWindowId === "string" ? tournament.eventWindowId : "";
       if (!eventWindowId || seen.has(eventWindowId)) continue;
       seen.add(eventWindowId);
       tournaments.push(tournament);
-      if (tournaments.length >= opts.maxEvents) break;
     }
   };
 
@@ -158,7 +298,14 @@ async function fetchTournamentPages(opts: {
     if (page.length < pageSize) break;
   }
 
-  return tournaments.slice(0, opts.maxEvents);
+  const now = Date.now();
+  return tournaments
+    .filter((tournament) => {
+      const endedAt = dateValue(tournament.endTime);
+      return endedAt === 0 || endedAt <= now;
+    })
+    .sort((a, b) => dateValue(b.endTime) - dateValue(a.endTime))
+    .slice(0, opts.maxEvents);
 }
 
 import { query, getCache, setCache, getCacheTtl } from "@/lib/db";
@@ -496,6 +643,7 @@ export async function GET(req: NextRequest) {
           limit,
           includeHistoricData,
           placementLimit: searchParams.get("placementLimit") || searchParams.get("historyLimit") || "100",
+          leaderboardPages: searchParams.get("leaderboardPages") || "8",
         };
         break;
       }
@@ -552,6 +700,7 @@ export async function GET(req: NextRequest) {
     if (action === "player-tournament-placements") {
       const accountId = searchParams.get("accountId") || searchParams.get("epicIds") || "";
       const maxEvents = Math.max(1, Math.min(Number(searchParams.get("placementLimit") || searchParams.get("historyLimit") || 100), 200));
+      const maxLeaderboardPages = Math.max(1, Math.min(Number(searchParams.get("leaderboardPages") || 8), 100));
       const listResult = await fetchJson(url, headers);
       response = listResult.response;
 
@@ -567,9 +716,13 @@ export async function GET(req: NextRequest) {
           maxEvents,
           season: searchParams.get("season"),
         });
-        const placements = await mapLimit(tournaments, 6, async (tournament) => {
+        const placements = await mapLimit(tournaments, 4, async (tournament) => {
           const eventWindowId = typeof tournament.eventWindowId === "string" ? tournament.eventWindowId : "";
           if (!eventWindowId) return null;
+
+          if (!OSIRION_API_KEY) {
+            return fetchLeaderboardPlacement(tournament, accountId, headers, maxLeaderboardPages);
+          }
 
           const params = new URLSearchParams({
             eventWindowId,

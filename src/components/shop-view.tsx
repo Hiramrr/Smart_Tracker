@@ -224,6 +224,7 @@ export function ShopView({ shop }: { shop: ShopData }) {
               >
                 <div className="relative aspect-[4/3] overflow-hidden bg-miyu-accent-light">
                   {image ? (
+                    // eslint-disable-next-line @next/next/no-img-element
                     <img src={image} alt={title} className="h-full w-full object-cover" />
                   ) : (
                     <div className="flex h-full items-center justify-center text-sm text-miyu-text-muted">

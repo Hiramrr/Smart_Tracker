@@ -197,7 +197,7 @@ interface TournamentPlacement {
   avgPlacement: number | null;
   totalMatches: number | null;
   eventLabel: string | null;
-  endTime: number | null;
+  endTime: number | string | null;
 }
 
 interface TournamentProfile {
@@ -250,34 +250,12 @@ async function fetchOsirionStats(accountId: string, timeframe: "season" | "lifet
 async function fetchTournamentHistory(accountId: string): Promise<{ placements: TournamentPlacement[]; scanned: number }> {
   try {
     const tournaments = await fetchPlayerTournamentWindows(accountId);
-    const maxWindows = Math.min(tournaments.length, 80);
-    const placements = await mapLimit(tournaments.slice(0, maxWindows), 6, async (tournament) => {
+    const maxWindows = Math.min(tournaments.length, 12);
+    const placements = await mapLimit(tournaments.slice(0, maxWindows), 4, async (tournament) => {
       const eventWindowId = asText(tournament.eventWindowId);
       if (!eventWindowId) return null;
 
-      const params = new URLSearchParams({
-        eventWindowId,
-        epicIds: accountId,
-        include: "points,eliminations,assists,avgPlacement",
-        includeRanks: "true",
-        includeTeam: "false",
-        orderBy: "points",
-        orderByDescending: "true",
-        fromIndex: "0",
-        limit: "10",
-      });
-      const eventId = asText(tournament.eventId);
-      if (eventId) params.set("eventId", eventId);
-
-      const res = await fetch(`${OSIRION_BASE}/tournaments/stats?${params.toString()}`, { headers: osirionHeaders() });
-      if (!res.ok) return null;
-      const data = await res.json();
-      const players = getPlayers(data);
-      const player = players.find((candidate) => {
-        const epicId = asText(candidate.epicId) || asText(candidate.accountId);
-        return epicId?.toLowerCase() === accountId.toLowerCase();
-      }) || players[0];
-      return player ? normalizeTournamentPlacement(player, tournament, accountId) : null;
+      return fetchLeaderboardPlacement(tournament, accountId, 8);
     });
 
     return { placements: placements.filter((p): p is TournamentPlacement => Boolean(p)), scanned: maxWindows };
@@ -303,7 +281,7 @@ async function fetchPlayerTournamentWindows(accountId: string): Promise<Record<s
     const res = await fetch(`${OSIRION_BASE}/tournaments?${params.toString()}`, { headers: osirionHeaders() });
     if (!res.ok) break;
     const data = await res.json();
-    const page = getTournaments(data);
+    const page = getTournamentWindows(data);
     if (page.length === 0) break;
 
     for (const tournament of page) {
@@ -315,7 +293,13 @@ async function fetchPlayerTournamentWindows(accountId: string): Promise<Record<s
     if (page.length < limit) break;
   }
 
-  return all.sort((a, b) => (toNumber(b.endTime) || 0) - (toNumber(a.endTime) || 0));
+  const now = Date.now();
+  return all
+    .filter((tournament) => {
+      const endedAt = dateValue(tournament.endTime);
+      return endedAt === 0 || endedAt <= now;
+    })
+    .sort((a, b) => dateValue(b.endTime) - dateValue(a.endTime));
 }
 
 async function mapLimit<T, R>(items: T[], concurrency: number, worker: (item: T) => Promise<R>): Promise<R[]> {
@@ -336,29 +320,110 @@ function getTournaments(data: unknown): Record<string, unknown>[] {
   return asRecordArray(record.tournaments || record.events || data);
 }
 
-function getPlayers(data: unknown): Record<string, unknown>[] {
-  const record = asRecord(data);
-  return asRecordArray(record.players || record.stats || record.results || record.leaderboard || data);
+function getTournamentWindows(data: unknown): Record<string, unknown>[] {
+  const windows: Record<string, unknown>[] = [];
+  for (const tournament of getTournaments(data)) {
+    const eventId = asText(tournament.eventId);
+    const displayData = asRecord(tournament.displayData);
+    const eventName =
+      asText(displayData.longFormatTitle) ||
+      asText(displayData.titleLine1) ||
+      asText(displayData.tournamentDisplayId) ||
+      eventId;
+    const eventWindows = asRecordArray(tournament.eventWindows);
+
+    if (eventWindows.length === 0) {
+      windows.push(tournament);
+      continue;
+    }
+
+    for (const eventWindow of eventWindows) {
+      const scoreLocations = asRecordArray(eventWindow.scoreLocations);
+      const mainScoreLocation = scoreLocations.find((location) => location.isMain === true) || scoreLocations[0] || {};
+      windows.push({
+        ...eventWindow,
+        eventId,
+        eventName,
+        leaderboardEventId: asText(mainScoreLocation.leaderboardEventId) || eventId,
+        leaderboardEventWindowId: asText(mainScoreLocation.leaderboardEventWindowId) || asText(eventWindow.eventWindowId),
+      });
+    }
+  }
+  return windows;
 }
 
-function normalizeTournamentPlacement(
-  player: Record<string, unknown>,
+async function fetchLeaderboardPlacement(
+  tournament: Record<string, unknown>,
+  accountId: string,
+  maxPages: number
+): Promise<TournamentPlacement | null> {
+  const leaderboardEventId = asText(tournament.leaderboardEventId) || asText(tournament.eventId);
+  const leaderboardEventWindowId = asText(tournament.leaderboardEventWindowId) || asText(tournament.eventWindowId);
+  if (!leaderboardEventId || !leaderboardEventWindowId) return null;
+
+  const pages = await Promise.all(Array.from({ length: maxPages }, async (_, page) => {
+    const params = new URLSearchParams({
+      leaderboardEventId,
+      leaderboardEventWindowId,
+      page: String(page),
+    });
+    const res = await fetch(`${OSIRION_BASE}/tournaments/leaderboard?${params.toString()}`, { headers: osirionHeaders() });
+    if (!res.ok) return { page, entries: [] as Record<string, unknown>[] };
+    const data = await res.json();
+    const leaderboard = asRecord(asRecord(data).leaderboard);
+    return { page, entries: asRecordArray(leaderboard.entries) };
+  }));
+
+  for (const pageResult of pages.sort((a, b) => a.page - b.page)) {
+    const entries = pageResult.entries;
+    if (entries.length === 0) continue;
+    const found = entries.find((entry) => asRecordArray(entry.players).some((player) => {
+      const playerAccountId = asText(player.accountId) || "";
+      return playerAccountId.toLowerCase() === accountId.toLowerCase();
+    }));
+    if (found) return normalizeLeaderboardPlacement(found, tournament, accountId);
+  }
+
+  return null;
+}
+
+function normalizeLeaderboardPlacement(
+  entry: Record<string, unknown>,
   tournament: Record<string, unknown>,
   accountId: string
 ): TournamentPlacement {
+  const players = asRecordArray(entry.players);
+  const matchedPlayer = players.find((player) => {
+    const playerAccountId = asText(player.accountId) || "";
+    return playerAccountId.toLowerCase() === accountId.toLowerCase();
+  }) || players[0] || {};
+  const sessionHistory = asRecordArray(entry.sessionHistory);
+  const eliminations = sessionHistory.reduce((sum, session) => {
+    const trackedStats = asRecord(session.trackedStats);
+    return sum + (
+      toNumber(trackedStats.TEAM_ELIMS_STAT_INDEX) ||
+      toNumber(trackedStats.ELIMS_STAT_INDEX) ||
+      toNumber(trackedStats.PLAYER_ELIMS_STAT_INDEX) ||
+      0
+    );
+  }, 0);
+  const placements = sessionHistory
+    .map((session) => toNumber(asRecord(session.trackedStats).PLACEMENT_STAT_INDEX))
+    .filter((value): value is number => value !== null && value > 0);
+
   return {
     accountId,
-    epicUsername: asText(player.epicUsername) || asText(player.displayName) || asText(player.name),
-    eventId: asText(tournament.eventId) || asText(player.eventId),
-    eventWindowId: asText(tournament.eventWindowId) || asText(player.eventWindowId) || "unknown",
-    placement: firstNumber(player, ["placement", "rank", "eventRank", "pointsRank", "scoreRank", "totalPointsRank", "sessionRank"]),
-    points: firstNumber(player, ["points", "score", "totalPoints"]),
-    eliminations: firstNumber(player, ["eliminations", "kills"]),
-    assists: firstNumber(player, ["assists"]),
-    avgPlacement: toNumber(player.avgPlacement),
-    totalMatches: firstNumber(player, ["matches", "totalMatches"]) ?? toNumber(tournament.totalMatches),
+    epicUsername: asText(matchedPlayer.username),
+    eventId: asText(tournament.leaderboardEventId) || asText(tournament.eventId),
+    eventWindowId: asText(tournament.leaderboardEventWindowId) || asText(tournament.eventWindowId) || "unknown",
+    placement: firstNumber(entry, ["rank", "placement", "eventRank"]),
+    points: firstNumber(entry, ["pointsEarned", "points", "score", "totalPoints"]),
+    eliminations: eliminations || null,
+    assists: null,
+    avgPlacement: placements.length ? average(placements) : null,
+    totalMatches: sessionHistory.length || toNumber(tournament.totalMatches),
     eventLabel: asText(tournament.eventName) || asText(tournament.name) || asText(tournament.eventWindowId),
-    endTime: toNumber(tournament.endTime),
+    endTime: toNumber(tournament.endTime) || asText(tournament.endTime),
   };
 }
 
@@ -464,6 +529,16 @@ function toNumber(value: unknown): number | null {
     return Number.isFinite(parsed) ? parsed : null;
   }
   return null;
+}
+
+function dateValue(value: unknown): number {
+  const numeric = toNumber(value);
+  if (numeric !== null) return numeric;
+  if (typeof value === "string") {
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  return 0;
 }
 
 function firstNumber(record: Record<string, unknown>, keys: string[]): number | null {
@@ -817,7 +892,6 @@ function classifyStrict(
     score >= 66 ||
     (best !== null && best <= 100) ||
     tournamentProfile.top500 >= 4 ||
-    (rankBonus >= 8 && kd >= 2.5) ||
     (globalRanking !== null && globalRanking > 0 && globalRanking <= 5000)
   ) {
     return {
@@ -836,8 +910,8 @@ function classifyStrict(
   // Casual: KD ≥0.5
   // Principiante: KD < 0.5
 
-  if (rankBonus >= 8 && kd >= 3 && wr >= 10) {
-    return { level: "Competitivo", value: 4, tier: "A", description: `Rango Unreal + KD ${kd.toFixed(2)}, WR ${wr.toFixed(1)}%` };
+  if (rankBonus >= 8 && globalRanking !== null && globalRanking > 0 && globalRanking <= 10000) {
+    return { level: "Competitivo", value: 4, tier: "A", description: `Rango Unreal top ${globalRanking.toLocaleString("es-MX")}, KD ${kd.toFixed(2)}` };
   }
   if (kd >= 8 && wr >= 35 && rankBonus >= 8) {
     return { level: "Elite / Pro", value: 5, tier: "S", description: `KD ${kd.toFixed(2)}, WR ${wr.toFixed(1)}%, Rango: ${latestRank?.currentRank || "Unreal"}` };

@@ -2,7 +2,59 @@ import type { ShopData, ShopEntry } from "@/components/shop-view";
 
 const OSIRION_API = "https://fnapi.osirion.gg/v1";
 
-function mapOffer(offer: any): ShopEntry {
+interface OsirionLayout {
+  id?: string;
+  displayName?: string;
+  category?: string;
+}
+
+interface OsirionItemDetails {
+  id?: string;
+  name?: string;
+  description?: string;
+  type?: { name?: string };
+  rarity?: { name?: string };
+  iconUrl?: string;
+  smallIconUrl?: string;
+}
+
+interface OsirionItem {
+  itemDetails?: OsirionItemDetails;
+}
+
+interface OsirionPresentation {
+  renderImage?: string;
+}
+
+interface OsirionPrice {
+  regularPrice?: number;
+  finalPrice?: number;
+}
+
+interface OsirionOffer {
+  offerId: string;
+  price?: OsirionPrice;
+  inDate?: string;
+  outDate?: string;
+  giftingEnabled?: boolean;
+  tileSize?: string;
+  layoutId?: string;
+  layout?: OsirionLayout;
+  bundleId?: string;
+  offerType?: string;
+  offerName?: string;
+  devName?: string;
+  items?: OsirionItem[];
+  presentations?: OsirionPresentation[];
+}
+
+interface OsirionPayload {
+  success?: boolean;
+  offers?: OsirionOffer[];
+  error?: string;
+}
+
+function mapOffer(offer: OsirionOffer): ShopEntry {
   return {
     offerId: offer.offerId,
     regularPrice: offer.price?.regularPrice,
@@ -25,7 +77,7 @@ function mapOffer(offer: any): ShopEntry {
             name: offer.offerName || offer.devName,
           }
         : undefined,
-    brItems: offer.items?.map((item: any) => ({
+    brItems: offer.items?.map((item) => ({
       id: item.itemDetails?.id,
       name: item.itemDetails?.name,
       description: item.itemDetails?.description,
@@ -42,7 +94,7 @@ function mapOffer(offer: any): ShopEntry {
     })),
     newDisplayAsset: offer.presentations?.length
       ? {
-          renderImages: offer.presentations.map((p: any) => ({
+          renderImages: offer.presentations.map((p) => ({
             image: p.renderImage,
           })),
         }
@@ -50,7 +102,7 @@ function mapOffer(offer: any): ShopEntry {
   };
 }
 
-function mapOsirionToShopData(payload: any): ShopData {
+function mapOsirionToShopData(payload: OsirionPayload): ShopData {
   return {
     date: payload.offers?.[0]?.inDate,
     entries: payload.offers?.map(mapOffer) ?? [],
@@ -62,7 +114,7 @@ export async function getShopData() {
     cache: "no-store",
   });
 
-  const payload = (await response.json()) as { success?: boolean; offers?: any[]; error?: string };
+  const payload = (await response.json()) as OsirionPayload;
 
   if (!response.ok || !payload.success) {
     throw new Error(payload.error || "No se pudo cargar la tienda");

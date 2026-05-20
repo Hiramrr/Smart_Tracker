@@ -44,20 +44,24 @@ function XIcon({ className }: { className?: string }) {
 }
 
 /* ─── CSS IntersectionObserver hook (replaces framer-motion whileInView) ── */
-function useInViewOnce(threshold = 0.2) {
-  const ref = useRef<HTMLDivElement>(null);
+function useInViewOnce(ref: React.RefObject<HTMLElement | null>, threshold = 0.2) {
   const [visible, setVisible] = useState(false);
   useEffect(() => {
     const el = ref.current;
-    if (!el) return;
+    if (!el || visible) return;
     const obs = new IntersectionObserver(
-      ([e]) => { if (e.isIntersecting) { setVisible(true); obs.disconnect(); } },
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setVisible(true);
+          obs.disconnect();
+        }
+      },
       { threshold }
     );
     obs.observe(el);
     return () => obs.disconnect();
-  }, [threshold]);
-  return { ref, visible };
+  }, [ref, threshold, visible]);
+  return visible;
 }
 
 /* ─── Data ───────────────────────────────────────────────────────── */
@@ -219,10 +223,14 @@ function Check() {
 /* ═════════════════════════════════════════════════════════════════ */
 export default function LandingPage() {
   const [menuOpen, setMenuOpen] = useState(false);
-  const strip = useInViewOnce(0.3);
-  const sources = useInViewOnce(0.2);
-  const features = useInViewOnce(0.2);
-  const cta = useInViewOnce(0.3);
+  const stripRef = useRef<HTMLElement>(null);
+  const sourcesRef = useRef<HTMLElement>(null);
+  const featuresRef = useRef<HTMLElement>(null);
+  const ctaRef = useRef<HTMLElement>(null);
+  const stripVisible = useInViewOnce(stripRef, 0.3);
+  const sourcesVisible = useInViewOnce(sourcesRef, 0.2);
+  const featuresVisible = useInViewOnce(featuresRef, 0.2);
+  const ctaVisible = useInViewOnce(ctaRef, 0.3);
 
   return (
     <>
@@ -441,17 +449,17 @@ export default function LandingPage() {
       <FortnitePipeline />
 
       {/* ─── 4. FEATURE STRIP ────────────────────────────────── */}
-      <section ref={strip.ref} className="border-y border-miyu-border bg-miyu-surface relative overflow-hidden">
+      <section ref={stripRef} className="border-y border-miyu-border bg-miyu-surface relative overflow-hidden">
         <Sparkle className="absolute top-1/2 left-[5%] -translate-y-1/2 w-6 h-6 opacity-10 pointer-events-none hidden lg:block -z-10" />
         <LightRing className="absolute top-[-10px] right-[5%] w-16 h-16 pointer-events-none hidden lg:block -z-10" />
         <div className="max-w-7xl mx-auto">
           <div
-            className={`grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 stagger-children ${strip.visible ? "visible" : ""}`}
+            className={`grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 stagger-children ${stripVisible ? "visible" : ""}`}
           >
             {featureStrip.map((item, i) => (
               <div
                 key={i}
-                className={`fade-up ${strip.visible ? "visible" : ""} px-8 py-8 lg:px-10 lg:py-10 ${i < featureStrip.length - 1
+                className={`fade-up ${stripVisible ? "visible" : ""} px-8 py-8 lg:px-10 lg:py-10 ${i < featureStrip.length - 1
                     ? "lg:border-r border-miyu-border"
                     : ""
                   } ${i < 2 ? "sm:border-b lg:border-b-0 border-miyu-border" : ""} ${i === 2 ? "sm:border-b lg:border-b-0 border-miyu-border" : ""
@@ -477,7 +485,7 @@ export default function LandingPage() {
       </section>
 
       {/* ─── 5. DATA SOURCES ─────────────────────────────────── */}
-      <section id="sources" ref={sources.ref} className="py-16 lg:py-20 relative overflow-hidden">
+      <section id="sources" ref={sourcesRef} className="py-16 lg:py-20 relative overflow-hidden">
         <Ring className="absolute top-20 left-[2%] w-32 h-32 opacity-10 pointer-events-none hidden lg:block -z-10" />
         <PlusDecorator className="absolute bottom-32 right-[5%] w-6 h-6 opacity-40 pointer-events-none hidden lg:block -z-10" />
         <SmallDot className="absolute top-1/3 right-[10%] w-3 h-3 opacity-50 pointer-events-none hidden lg:block -z-10" />
@@ -485,10 +493,10 @@ export default function LandingPage() {
         <LightRing className="absolute bottom-10 left-[5%] w-20 h-20 pointer-events-none hidden lg:block -z-10" />
         <div className="max-w-7xl mx-auto px-6">
           <div
-            className={`grid grid-cols-1 lg:grid-cols-2 gap-16 items-start stagger-children ${sources.visible ? "visible" : ""}`}
+            className={`grid grid-cols-1 lg:grid-cols-2 gap-16 items-start stagger-children ${sourcesVisible ? "visible" : ""}`}
           >
             {/* Left text */}
-            <div className={`space-y-5 fade-up ${sources.visible ? "visible" : ""}`}>
+            <div className={`space-y-5 fade-up ${sourcesVisible ? "visible" : ""}`}>
               <p
                 className="text-[13px] text-miyu-text-muted tracking-wide"
                 style={{ fontFamily: "var(--font-space-mono), monospace" }}
@@ -517,7 +525,7 @@ export default function LandingPage() {
             </div>
 
             {/* Right cards */}
-            <div className={`grid grid-cols-1 sm:grid-cols-2 gap-5 fade-up ${sources.visible ? "visible" : ""}`}>
+            <div className={`grid grid-cols-1 sm:grid-cols-2 gap-5 fade-up ${sourcesVisible ? "visible" : ""}`}>
               {/* Fortnite card */}
               <div className="bg-miyu-surface border border-miyu-border rounded-xl p-6 hover:shadow-[0_8px_32px_rgba(123,94,167,0.12)] hover:-translate-y-1 transition-all duration-300">
                 <div className="flex items-center gap-3 mb-5">
@@ -575,7 +583,7 @@ export default function LandingPage() {
       </section>
 
       {/* ─── 5. WHAT YOU CAN DO ──────────────────────────────── */}
-      <section id="features" ref={features.ref} className="py-24 lg:py-32 border-t border-miyu-border relative overflow-hidden">
+      <section id="features" ref={featuresRef} className="py-24 lg:py-32 border-t border-miyu-border relative overflow-hidden">
         <Sparkle className="absolute top-32 left-[5%] w-8 h-8 opacity-20 pointer-events-none hidden lg:block -z-10" />
         <DottedCircle className="absolute -bottom-20 -right-20 w-[400px] h-[400px] opacity-10 pointer-events-none hidden lg:block -z-10" />
         <Diamond className="absolute top-1/2 left-[10%] w-5 h-5 opacity-20 pointer-events-none hidden lg:block -z-10" />
@@ -583,11 +591,11 @@ export default function LandingPage() {
         <LightSparkle className="absolute bottom-[15%] left-[15%] w-10 h-10 pointer-events-none hidden lg:block -z-10" />
         <div className="max-w-7xl mx-auto px-6">
           <div
-            className={`space-y-16 stagger-children ${features.visible ? "visible" : ""}`}
+            className={`space-y-16 stagger-children ${featuresVisible ? "visible" : ""}`}
           >
             {/* Header */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-              <div className={`lg:col-span-1 space-y-4 fade-up ${features.visible ? "visible" : ""}`}>
+              <div className={`lg:col-span-1 space-y-4 fade-up ${featuresVisible ? "visible" : ""}`}>
                 <p
                   className="text-[13px] text-miyu-text-muted tracking-wide"
                   style={{ fontFamily: "var(--font-space-mono), monospace" }}
@@ -616,7 +624,7 @@ export default function LandingPage() {
 
               {/* Feature grid */}
               <div
-                className={`lg:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-8 fade-up ${features.visible ? "visible" : ""}`}
+                className={`lg:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-8 fade-up ${featuresVisible ? "visible" : ""}`}
               >
                 {capabilities.map((cap) => (
                   <div key={cap.title} className="space-y-3">
@@ -636,7 +644,7 @@ export default function LandingPage() {
       </section>
 
       {/* ─── 6. CTA FINAL ────────────────────────────────────── */}
-      <section id="cta" ref={cta.ref} className="relative overflow-hidden">
+      <section id="cta" ref={ctaRef} className="relative overflow-hidden">
         <CurvedLine className="absolute bottom-0 left-0 w-[400px] h-[400px] opacity-20 pointer-events-none rotate-180 hidden lg:block -z-10" />
         <Diamond className="absolute top-20 right-[5%] w-5 h-5 opacity-30 pointer-events-none hidden md:block -z-10" />
         <PlusDecorator className="absolute bottom-10 right-[15%] w-4 h-4 opacity-40 pointer-events-none hidden md:block -z-10" />
@@ -645,9 +653,9 @@ export default function LandingPage() {
 
         <div className="max-w-7xl mx-auto px-6 py-20 lg:py-28">
           <div
-            className={`bg-miyu-surface border border-miyu-border rounded-2xl p-10 lg:p-16 grid grid-cols-1 lg:grid-cols-2 gap-10 items-center stagger-children ${cta.visible ? "visible" : ""}`}
+            className={`bg-miyu-surface border border-miyu-border rounded-2xl p-10 lg:p-16 grid grid-cols-1 lg:grid-cols-2 gap-10 items-center stagger-children ${ctaVisible ? "visible" : ""}`}
           >
-            <div className={`fade-up ${cta.visible ? "visible" : ""}`}>
+            <div className={`fade-up ${ctaVisible ? "visible" : ""}`}>
               <h2 className="text-3xl lg:text-4xl font-bold leading-tight">
                 hecho por jugadores,
                 <br />
@@ -656,7 +664,7 @@ export default function LandingPage() {
               </h2>
             </div>
 
-            <div className={`space-y-5 fade-up ${cta.visible ? "visible" : ""}`}>
+            <div className={`space-y-5 fade-up ${ctaVisible ? "visible" : ""}`}>
               <p className="text-[15px] text-miyu-text-muted leading-relaxed">
                 Este proyecto es open source y está en constante desarrollo.
                 Únete, aporta o úsalo para llevar tu análisis al siguiente

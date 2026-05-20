@@ -1,21 +1,16 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
   Activity,
-  Database,
   Globe,
   Layers,
   RefreshCcw,
-  Clock,
-  CheckCircle2,
-  AlertTriangle,
   User,
   ShoppingBag,
   ArrowRight,
   Terminal,
-  Code2,
   ChevronRight,
   BarChart,
   HardDrive,
@@ -29,8 +24,6 @@ import {
   ResponsiveContainer,
   AreaChart,
   Area,
-  BarChart as RechartsBarChart,
-  Bar,
   Cell,
   PieChart,
   Pie,
@@ -39,21 +32,23 @@ import {
 // ==========================================
 // Types
 // ==========================================
+interface RecentCall {
+  id: string;
+  action: string;
+  api_source: string;
+  response_status: number;
+  duration_ms: number;
+  created_at: string;
+  parameters: Record<string, unknown>;
+}
+
 interface Stats {
   totalCalls: number;
   todayCalls: number;
   callsByAction: Array<{ action: string; total: string; avg_duration: string }>;
   callsBySource: Array<{ api_source: string; total: string }>;
   errors: Array<{ response_status: string; total: string }>;
-  recentCalls: Array<{
-    id: string;
-    action: string;
-    api_source: string;
-    response_status: number;
-    duration_ms: number;
-    created_at: string;
-    parameters: any;
-  }>;
+  recentCalls: RecentCall[];
   hourlyStats: Array<{ hour: string; total: number; avgDuration: string }>;
   snapshots: {
     total: number;
@@ -63,7 +58,7 @@ interface Stats {
     totalEntries: number;
   };
   progress: {
-    recent: any[];
+    recent: unknown[];
   };
 }
 
@@ -76,47 +71,52 @@ export default function DatalakeDashboard() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState(new Date());
-  const [selectedCall, setSelectedCall] = useState<any>(null);
+  const [selectedCall, setSelectedCall] = useState<RecentCall | null>(null);
 
-  const fetchStats = async () => {
-    try {
-      setLoading(true);
-      const response = await fetch("/api/datalake/stats");
-      const data = await response.json();
-      if (data.success) {
-        setStats(data.stats);
-        if (data.stats.recentCalls.length > 0 && !selectedCall) {
-          setSelectedCall(data.stats.recentCalls[0]);
-        }
-      } else {
-         throw new Error("API returned success: false");
-      }
-      setLastUpdated(new Date());
-    } catch (error) {
-      console.error("Error fetching datalake stats:", error);
-      // Fallback para evitar que se quede cargando infinito o en blanco si falla la tabla nueva
-      if (!stats) {
-        setStats({
-          totalCalls: 0,
-          todayCalls: 0,
-          callsByAction: [],
-          callsBySource: [],
-          errors: [],
-          recentCalls: [],
-          hourlyStats: [],
-          snapshots: { total: 0, recent: [] },
-          shop: { totalEntries: 0 },
-          progress: { recent: [] }
-        } as any);
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
+  const selectedCallRef = useRef<RecentCall | null>(null);
+  const statsRef = useRef<Stats | null>(null);
+
+  useEffect(() => { selectedCallRef.current = selectedCall; }, [selectedCall]);
+  useEffect(() => { statsRef.current = stats; }, [stats]);
 
   useEffect(() => {
-    fetchStats();
-    const interval = setInterval(fetchStats, 30000);
+    async function loadStats() {
+      try {
+        setLoading(true);
+        const response = await fetch("/api/datalake/stats");
+        const data = await response.json();
+        if (data.success) {
+          setStats(data.stats as Stats);
+          setLastUpdated(new Date());
+          if (data.stats.recentCalls.length > 0 && !selectedCallRef.current) {
+            setSelectedCall(data.stats.recentCalls[0] as RecentCall);
+          }
+        } else {
+          throw new Error("API returned success: false");
+        }
+      } catch (error) {
+        console.error("Error fetching datalake stats:", error);
+        // Fallback para evitar que se quede cargando infinito o en blanco si falla la tabla nueva
+        if (!statsRef.current) {
+          setStats({
+            totalCalls: 0,
+            todayCalls: 0,
+            callsByAction: [],
+            callsBySource: [],
+            errors: [],
+            recentCalls: [],
+            hourlyStats: [],
+            snapshots: { total: 0, recent: [] },
+            shop: { totalEntries: 0 },
+            progress: { recent: [] }
+          });
+        }
+      } finally {
+        setLoading(false);
+      }
+    }
+    loadStats();
+    const interval = setInterval(loadStats, 30000);
     return () => clearInterval(interval);
   }, []);
 
@@ -157,7 +157,26 @@ export default function DatalakeDashboard() {
             <p className="text-sm font-bold text-miyu-text">{lastUpdated.toLocaleTimeString([], { hour12: false })}</p>
           </div>
           <button
-            onClick={fetchStats}
+            onClick={() => {
+              setLoading(true);
+              void (async () => {
+                try {
+                  const response = await fetch("/api/datalake/stats");
+                  const data = await response.json();
+                  if (data.success) {
+                    setStats(data.stats as Stats);
+                    setLastUpdated(new Date());
+                    if (data.stats.recentCalls.length > 0 && !selectedCallRef.current) {
+                      setSelectedCall(data.stats.recentCalls[0] as RecentCall);
+                    }
+                  }
+                } catch (error) {
+                  console.error(error);
+                } finally {
+                  setLoading(false);
+                }
+              })();
+            }}
             className="flex items-center justify-center w-10 h-10 bg-miyu-btn hover:bg-miyu-btn-hover text-miyu-text border border-miyu-text/10 rounded-lg transition-all active:scale-95"
           >
             <RefreshCcw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
@@ -254,7 +273,7 @@ export default function DatalakeDashboard() {
                   nameKey="api_source"
                   stroke="none"
                 >
-                  {stats?.callsBySource.map((entry, index) => (
+                  {stats?.callsBySource.map((_entry, index) => (
                     <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                   ))}
                 </Pie>
@@ -325,21 +344,21 @@ export default function DatalakeDashboard() {
                 {selectedCall ? (
                   <div className="space-y-6">
                     <div>
-                      <span className="text-slate-500">// metadatos</span>
+                      <span className="text-slate-500">{/* metadatos */}</span>
                       <div className="mt-1 pl-4 border-l border-slate-800 space-y-1">
-                        <p><span className="text-blue-400">id:</span> "{selectedCall.id}"</p>
-                        <p><span className="text-blue-400">timestamp:</span> "{selectedCall.created_at}"</p>
+                        <p><span className="text-blue-400">id:</span> &quot;{selectedCall.id}&quot;</p>
+                        <p><span className="text-blue-400">timestamp:</span> &quot;{selectedCall.created_at}&quot;</p>
                         <p><span className="text-blue-400">latencia:</span> {selectedCall.duration_ms}ms</p>
                       </div>
                     </div>
                     <div>
-                      <span className="text-slate-500">// parametros_recibidos</span>
+                      <span className="text-slate-500">{/* parametros_recibidos */}</span>
                       <pre className="mt-1 pl-4 border-l border-slate-800 text-slate-300">
                         {JSON.stringify(selectedCall.parameters, null, 2)}
                       </pre>
                     </div>
                     <div className="pt-4 mt-4 border-t border-slate-800">
-                       <span className="text-slate-500 italic">/* FIN_DEL_STREAM */</span>
+                       <span className="text-slate-500 italic">{/* FIN_DEL_STREAM */}</span>
                     </div>
                   </div>
                 ) : (
@@ -402,7 +421,7 @@ export default function DatalakeDashboard() {
 // ==========================================
 // Helper Components
 // ==========================================
-function MetricTile({ label, value, icon, description }: any) {
+function MetricTile({ label, value, icon, description }: { label: string; value: number | undefined; icon: React.ReactNode; description: string }) {
   return (
     <div className="bg-miyu-surface border border-miyu-border p-6 rounded-2xl shadow-sm hover:translate-y-[-2px] transition-all">
       <div className="flex items-center gap-3 mb-4">

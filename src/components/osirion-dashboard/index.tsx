@@ -89,6 +89,14 @@ interface TournamentPlacementsData {
   placements?: TournamentPlacement[];
 }
 
+interface ProgressMetric {
+  metric_name: string;
+  metric_value: string;
+  delta: string;
+  period_start?: string;
+  _extra?: Record<string, unknown>;
+}
+
 type InputMethod = "keyboardmouse" | "gamepad" | "touch" | string;
 type GameMode = "p2" | "p10" | "p9" | string;
 const CANONICAL_GAME_MODES = ["solo", "duo", "trio", "squad", "ltm"] as const;
@@ -136,7 +144,9 @@ function formatPlacement(value: number | string | null | undefined) {
 }
 
 function formatTournamentDate(value: number | string | null | undefined) {
-  const parsed = Number(value);
+  if (value === null || value === undefined || value === "") return "fecha n/d";
+  const numeric = Number(value);
+  const parsed = Number.isFinite(numeric) ? numeric : Date.parse(String(value));
   if (!Number.isFinite(parsed) || parsed <= 0) return "fecha n/d";
   const millis = parsed > 10_000_000_000_000 ? parsed / 1000 : parsed;
   return new Date(millis).toLocaleDateString("es-MX", {
@@ -183,11 +193,13 @@ export default function OsirionDashboard({
       return [];
     }
   });
+  const searchHistoryRef = useRef(searchHistory);
+  useEffect(() => { searchHistoryRef.current = searchHistory; }, [searchHistory]);
   const [showHistory, setShowHistory] = useState(false);
   const [selectedInputMethod, setSelectedInputMethod] = useState<InputMethod | "all">("all");
   const [selectedGameMode, setSelectedGameMode] = useState<GameMode | "all">("all");
   const [activeTab, setActiveTab] = useState<"overview" | "modes" | "ranked" | "tournaments" | "progreso">("overview");
-  const [progressData, setProgressData] = useState<any[]>([]);
+  const [progressData, setProgressData] = useState<ProgressMetric[]>([]);
   const [rankedMode, setRankedMode] = useState<"br" | "reload">("br");
 
   const fetchStats = useCallback(async (accountId: string, displayName: string, timeframe: "season" | "lifetime") => {
@@ -216,7 +228,7 @@ export default function OsirionDashboard({
       setRankedData(rankedJson);
 
       try {
-        const tournamentRes = await fetch(`/api/osirion?action=player-tournament-placements&accountId=${encodeURIComponent(accountId)}&limit=12`);
+        const tournamentRes = await fetch(`/api/osirion?action=player-tournament-placements&accountId=${encodeURIComponent(accountId)}&limit=50&placementLimit=12&leaderboardPages=8`);
         if (!tournamentRes.ok) throw new Error(`error en torneos: ${tournamentRes.status}`);
         const tournamentJson: TournamentPlacementsData = await tournamentRes.json();
         setTournamentData(tournamentJson);
@@ -247,7 +259,7 @@ export default function OsirionDashboard({
     }
   }, []);
 
-  const handleSearch = async (e: React.FormEvent, overrideQuery?: string, overrideDisplayName?: string) => {
+  const handleSearch = useCallback(async (e: React.FormEvent, overrideQuery?: string, overrideDisplayName?: string) => {
     e.preventDefault();
     const query = (overrideQuery || searchInput).trim();
     if (!query) return;
@@ -286,7 +298,7 @@ export default function OsirionDashboard({
         displayName,
         timestamp: new Date().getTime(),
       };
-      const updatedHistory = [newHistory, ...searchHistory.filter(h => h.accountId !== accountId)].slice(0, 10);
+      const updatedHistory = [newHistory, ...searchHistoryRef.current.filter(h => h.accountId !== accountId)].slice(0, 10);
       setSearchHistory(updatedHistory);
       localStorage.setItem("fortnite-search-history", JSON.stringify(updatedHistory));
 
@@ -302,10 +314,12 @@ export default function OsirionDashboard({
       setIsLoading(false);
       setLoadingMsg("");
     }
-  };
+  }, [searchInput, currentTimeframe, fetchStats]);
 
   const handleSearchRef = useRef(handleSearch);
-  handleSearchRef.current = handleSearch;
+  useEffect(() => {
+    handleSearchRef.current = handleSearch;
+  }, [handleSearch]);
 
   const searchFromHistory = (displayName: string) => {
     setSearchInput(displayName);
@@ -314,8 +328,8 @@ export default function OsirionDashboard({
 
   useEffect(() => {
     if (!initialPlayer || initialPlayer === currentAccountId) return;
-    setSearchInput(initialDisplayName || initialPlayer);
     const timeout = window.setTimeout(() => {
+      setSearchInput(initialDisplayName || initialPlayer);
       void handleSearchRef.current({ preventDefault: () => undefined } as React.FormEvent, initialPlayer, initialDisplayName);
     }, 0);
     return () => window.clearTimeout(timeout);
@@ -545,7 +559,7 @@ export default function OsirionDashboard({
                     onClick={() => searchFromHistory(h.displayName)}
                     className="flex w-full items-center justify-between bg-miyu-btn px-3 py-2 text-left hover:bg-miyu-btn-hover"
                   >
-                    <span className="font-mono text-sm text-miyu-text">{h.displayName}</span>
+                    <span className="text-sm font-semibold text-miyu-text">{h.displayName}</span>
                     <span className="text-xs text-miyu-text-muted">{new Date(h.timestamp).toLocaleDateString("es-MX")}</span>
                   </button>
                 ))}
@@ -788,7 +802,7 @@ export default function OsirionDashboard({
                       <div className="grid gap-4 md:grid-cols-3">
                          {/* Skill Category — 6 tiers */}
                          {(() => {
-                           const skillItem = progressData.find((m: any) => m.metric_name === 'skill_category');
+                           const skillItem = progressData.find((m: ProgressMetric) => m.metric_name === 'skill_category');
                            if (!skillItem) return null;
                            const val = parseFloat(skillItem.metric_value);
                            const tier = skillItem.period_start || '';
@@ -816,7 +830,7 @@ export default function OsirionDashboard({
 
                          {/* Predicted KD */}
                          {(() => {
-                           const predKd = progressData.find((m: any) => m.metric_name === 'predicted_kd_next');
+                           const predKd = progressData.find((m: ProgressMetric) => m.metric_name === 'predicted_kd_next');
                            if (!predKd) return null;
                            return (
                              <div className="p-4 rounded-xl border border-miyu-border bg-white/40">
@@ -833,7 +847,7 @@ export default function OsirionDashboard({
 
                          {/* Predicted WR */}
                          {(() => {
-                           const predWr = progressData.find((m: any) => m.metric_name === 'predicted_wr_next');
+                           const predWr = progressData.find((m: ProgressMetric) => m.metric_name === 'predicted_wr_next');
                            if (!predWr) return null;
                            return (
                              <div className="p-4 rounded-xl border border-miyu-border bg-white/40">
@@ -855,7 +869,7 @@ export default function OsirionDashboard({
                             <h4 className="text-xs font-bold text-miyu-accent uppercase mb-4 tracking-widest">K/D por Modo de Juego</h4>
                             <div className="h-[220px]">
                                <ResponsiveContainer width="100%" height="100%">
-                                  <ReBarChart data={progressData.filter((m: any) => m.metric_name === 'kd_season')} barGap={2}>
+                                  <ReBarChart data={progressData.filter((m: ProgressMetric) => m.metric_name === 'kd_season')} barGap={2}>
                                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#dfd8cc" />
                                      <XAxis dataKey="period_start" fontSize={8} tickLine={false} axisLine={false} angle={-35} textAnchor="end" height={50} />
                                      <YAxis fontSize={9} tickLine={false} axisLine={false} domain={[0, 'auto']} />
@@ -870,7 +884,7 @@ export default function OsirionDashboard({
                             <h4 className="text-xs font-bold text-miyu-accent uppercase mb-4 tracking-widest">Win Rate por Modo de Juego</h4>
                             <div className="h-[220px]">
                                <ResponsiveContainer width="100%" height="100%">
-                                  <ReBarChart data={progressData.filter((m: any) => m.metric_name === 'win_rate_season')} barGap={2}>
+                                  <ReBarChart data={progressData.filter((m: ProgressMetric) => m.metric_name === 'win_rate_season')} barGap={2}>
                                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#dfd8cc" />
                                      <XAxis dataKey="period_start" fontSize={8} tickLine={false} axisLine={false} angle={-35} textAnchor="end" height={50} />
                                      <YAxis fontSize={9} tickLine={false} axisLine={false} domain={[0, 'auto']} />
@@ -884,7 +898,7 @@ export default function OsirionDashboard({
 
                       {/* ── Row 3: Mode Detail Table ── */}
                       {(() => {
-                        const details = progressData.filter((m: any) => m.metric_name === 'mode_detail');
+                        const details = progressData.filter((m: ProgressMetric) => m.metric_name === 'mode_detail');
                         if (!details.length) return null;
                         return (
                           <div className="bg-white/40 border border-miyu-border rounded-xl p-6">
@@ -903,15 +917,15 @@ export default function OsirionDashboard({
                                       </tr>
                                    </thead>
                                    <tbody>
-                                      {details.map((d: any, i: number) => (
+                                      {details.map((d: ProgressMetric, i: number) => (
                                         <tr key={i} className={`border-b border-miyu-border/30 ${d.period_start?.includes('Overall') ? 'font-bold bg-miyu-accent/5' : ''}`}>
                                            <td className="py-2.5 pr-3 text-miyu-text">{d.period_start}</td>
-                                           <td className="py-2.5 pr-3 text-right font-bold">{parseFloat(d.metric_value).toFixed(2)}</td>
-                                           <td className="py-2.5 pr-3 text-right">{parseFloat(d.delta).toFixed(1)}%</td>
-                                           <td className="py-2.5 pr-3 text-right">{(d._extra?.kills || 0).toLocaleString()}</td>
-                                           <td className="py-2.5 pr-3 text-right">{(d._extra?.wins || 0).toLocaleString()}</td>
-                                           <td className="py-2.5 pr-3 text-right">{(d._extra?.matches || 0).toLocaleString()}</td>
-                                           <td className="py-2.5 text-right">{(d._extra?.killsPerMatch || 0).toFixed(1)}</td>
+                                            <td className="py-2.5 pr-3 text-right font-bold">{parseFloat(d.metric_value).toFixed(2)}</td>
+                                            <td className="py-2.5 pr-3 text-right">{parseFloat(d.delta).toFixed(1)}%</td>
+                                            <td className="py-2.5 pr-3 text-right">{(Number(d._extra?.kills) || 0).toLocaleString()}</td>
+                                            <td className="py-2.5 pr-3 text-right">{(Number(d._extra?.wins) || 0).toLocaleString()}</td>
+                                            <td className="py-2.5 pr-3 text-right">{(Number(d._extra?.matches) || 0).toLocaleString()}</td>
+                                            <td className="py-2.5 text-right">{(Number(d._extra?.killsPerMatch) || 0).toFixed(1)}</td>
                                         </tr>
                                       ))}
                                    </tbody>
@@ -923,8 +937,8 @@ export default function OsirionDashboard({
 
                       {/* ── Row 4: Historical Snapshots (if any) ── */}
                       {(() => {
-                        const snapshotKd = progressData.filter((m: any) => m.metric_name === 'snapshot_kd');
-                        const snapshotWr = progressData.filter((m: any) => m.metric_name === 'snapshot_wr');
+                        const snapshotKd = progressData.filter((m: ProgressMetric) => m.metric_name === 'snapshot_kd');
+                        const snapshotWr = progressData.filter((m: ProgressMetric) => m.metric_name === 'snapshot_wr');
                         if (snapshotKd.length < 2) return null;
                         return (
                           <div className="grid gap-6 md:grid-cols-2">
@@ -962,10 +976,10 @@ export default function OsirionDashboard({
 
                       {/* ── Row 5: Ranked History + Rank Prediction ── */}
                       {(() => {
-                        const rankedBR = progressData.filter((m: any) => m.metric_name === 'ranked_history');
-                        const rankedReload = progressData.filter((m: any) => m.metric_name === 'ranked_history_reload');
+                        const rankedBR = progressData.filter((m: ProgressMetric) => m.metric_name === 'ranked_history');
+                        const rankedReload = progressData.filter((m: ProgressMetric) => m.metric_name === 'ranked_history_reload');
                         const ranked = rankedMode === 'br' ? rankedBR : rankedReload;
-                        const rankPred = progressData.find((m: any) => m.metric_name === 'predicted_rank');
+                        const rankPred = progressData.find((m: ProgressMetric) => m.metric_name === 'predicted_rank');
                         if (!rankedBR.length && !rankedReload.length) return null;
 
                         const RANK_LABELS: Record<number, string> = { 1: "Bronce", 2: "Plata", 3: "Oro", 4: "Platino", 5: "Diamante", 6: "Elite", 7: "Campeón", 8: "Unreal" };
@@ -999,9 +1013,11 @@ export default function OsirionDashboard({
                                               <YAxis fontSize={9} tickLine={false} axisLine={false} domain={[0, 8]} tickFormatter={(v: number) => RANK_LABELS[v] || ""} />
                                               <Tooltip
                                                 contentStyle={{ fontSize: '10px', borderRadius: '8px', border: '1px solid #dfd8cc' }}
-                                                formatter={(value: any, _name: any, props: any) => {
-                                                  const d = props.payload;
-                                                  return [`${d._extra?.highestRank || RANK_LABELS[value as number] || value}${d._extra?.globalRanking ? ` (#${d._extra.globalRanking})` : ''}`, 'Rango Más Alto'];
+                                                 formatter={(value: unknown, _name: unknown, props: unknown) => {
+                                                  const d = (props as { payload?: ProgressMetric }).payload;
+                                                  if (!d) return ['', ''];
+                                                  const v = Number(value);
+                                                  return [`${String(d._extra?.highestRank || RANK_LABELS[v] || value)}${d._extra?.globalRanking ? ` (#${d._extra.globalRanking})` : ''}`, 'Rango Más Alto'];
                                                 }}
                                               />
                                               <Bar dataKey="metric_value" name="Rango" radius={[4, 4, 0, 0]}
@@ -1012,10 +1028,10 @@ export default function OsirionDashboard({
                                      </div>
                                      {/* Rank legend */}
                                      <div className="flex flex-wrap gap-2 mt-3">
-                                        {ranked.map((r: any, i: number) => (
+                                        {ranked.map((r: ProgressMetric, i: number) => (
                                           <span key={i} className="text-[9px] font-mono px-2 py-0.5 rounded border border-miyu-border/50 bg-white/60">
-                                            {r.period_start}: <span className="font-bold">{r._extra?.highestRank || r._extra?.currentRank}</span>
-                                            {r._extra?.globalRanking ? ` #${r._extra.globalRanking}` : ''}
+                                             {r.period_start}: <span className="font-bold">{String(r._extra?.highestRank || r._extra?.currentRank || '')}</span>
+                                             {r._extra?.globalRanking ? ` #${String(r._extra.globalRanking)}` : ''}
                                           </span>
                                         ))}
                                      </div>
@@ -1029,16 +1045,16 @@ export default function OsirionDashboard({
                                           <p className="text-xl font-bold font-mono text-purple-800">{rankPred.period_start}</p>
                                           <div className="mt-2 flex items-center gap-1.5">
                                              <span className={`inline-block w-1.5 h-1.5 rounded-full ${rankPred._extra?.confidence === 'alta' ? 'bg-emerald-500' : rankPred._extra?.confidence === 'media' ? 'bg-amber-500' : 'bg-red-500'}`}></span>
-                                             <span className="text-[10px] font-mono text-purple-600">Confianza: {rankPred._extra?.confidence}</span>
-                                          </div>
-                                          <p className="text-[10px] text-purple-700 mt-2 leading-relaxed">{rankPred._extra?.reasoning}</p>
+                                              <span className="text-[10px] font-mono text-purple-600">Confianza: {String(rankPred._extra?.confidence || '')}</span>
+                                           </div>
+                                           <p className="text-[10px] text-purple-700 mt-2 leading-relaxed">{String(rankPred._extra?.reasoning || '')}</p>
                                        </div>
                                      )}
                                      <div className="p-4 rounded-xl border border-miyu-border bg-white/40">
                                         <p className="text-[10px] uppercase font-bold mb-1 tracking-widest text-miyu-text-muted">Temporadas Registradas</p>
                                         <p className="text-2xl font-bold font-mono">{ranked.length}</p>
                                         <p className="text-[10px] text-miyu-text-muted mt-1">
-                                          Último: <span className="font-bold">{ranked[ranked.length - 1]._extra?.highestRank || ranked[ranked.length - 1]._extra?.currentRank}</span>
+                                           Último: <span className="font-bold">{String(ranked[ranked.length - 1]._extra?.highestRank || ranked[ranked.length - 1]._extra?.currentRank || '')}</span>
                                         </p>
                                      </div>
                                   </div>
@@ -1399,22 +1415,6 @@ function normalizeRankName(rank: string) {
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "");
-}
-
-function ProgressCircle({ label, value, color }: { label: string; value: string; color: string }) {
-  const colorMap: any = {
-    emerald: "text-emerald-600 bg-emerald-50",
-    blue: "text-blue-600 bg-blue-50",
-    purple: "text-miyu-accent bg-miyu-accent-light",
-  };
-  return (
-    <div className="flex items-center justify-between">
-      <span className="text-sm font-mono text-miyu-text-muted">{label}</span>
-      <span className={`px-2 py-1 rounded-full text-xs font-bold font-mono ${colorMap[color] || colorMap.purple}`}>
-        {value}
-      </span>
-    </div>
-  );
 }
 
 function StatCard({

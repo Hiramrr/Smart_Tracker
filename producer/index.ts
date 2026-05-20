@@ -5,7 +5,7 @@ import { Pool } from "pg";
 // Configuración
 // ==========================================
 const KAFKA_BROKER = process.env.KAFKA_BROKER || "kafka:29092";
-const KAFKA_TOPIC = process.env.KAFKA_TOPIC_API_CALLS || "api-calls";
+const _KAFKA_TOPIC = process.env.KAFKA_TOPIC_API_CALLS || "api-calls";
 const DATABASE_URL = process.env.DATABASE_URL;
 const POLL_INTERVAL = 2000; // 2 segundos
 

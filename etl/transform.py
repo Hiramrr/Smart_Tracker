@@ -467,7 +467,7 @@ def classify_competitive_profile(score, best, top_25, top_100, top_500):
     """
     if score >= 88 or best <= 10 or top_25 >= 2 or top_100 >= 5:
         return 5
-    if score >= 66 or best <= 100 or top_500 >= 4:
+    if score >= 72 or best <= 75 or top_100 >= 2 or top_500 >= 6:
         return 4
     if score >= 36 or best <= 1000:
         return 3

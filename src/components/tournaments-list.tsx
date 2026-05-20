@@ -166,16 +166,19 @@ function TournamentImage({
   const localUrl = `/api/tournament-image?eventId=${encodeURIComponent(tournament.eventId)}&type=${imageSource.type}&url=${encodeURIComponent(imageSource.url)}`;
 
   return (
-    <img
-      src={localUrl}
-      alt=""
-      className={`object-cover ${className}`}
-      loading="lazy"
-      onError={(e) => {
-        const image = e.target as HTMLImageElement;
-        if (image.src !== imageSource.url) image.src = imageSource.url;
-      }}
-    />
+    <>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={localUrl}
+        alt=""
+        className={`object-cover ${className}`}
+        loading="lazy"
+        onError={(e) => {
+          const image = e.target as HTMLImageElement;
+          if (image.src !== imageSource.url) image.src = imageSource.url;
+        }}
+      />
+    </>
   );
 }
 
