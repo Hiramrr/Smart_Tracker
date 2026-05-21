@@ -62,6 +62,15 @@ export async function closePool() {
 // Funciones de Cache (Cache-Aside Pattern)
 // ==========================================
 
+export interface ApiCacheEntry {
+  data: unknown;
+  cacheKey: string;
+  action: string;
+  createdAt: string;
+  expiresAt: string;
+  isExpired: boolean;
+}
+
 /**
  * Genera una clave de cache a partir de los parámetros
  */
@@ -72,22 +81,37 @@ export function generateCacheKey(action: string, params: Record<string, unknown>
 }
 
 /**
- * Obtiene un dato del cache si existe y no ha expirado
+ * Obtiene una entrada de cache. Cuando includeExpired es true funciona como
+ * buffer local para redes donde la API externa este bloqueada.
  */
-export async function getCache(
+export async function getCacheEntry(
   action: string,
-  params: Record<string, unknown>
-): Promise<unknown | null> {
+  params: Record<string, unknown>,
+  includeExpired = false
+): Promise<ApiCacheEntry | null> {
   try {
     const cacheKey = generateCacheKey(action, params);
     const result = await query(
-      `SELECT data FROM api_cache WHERE cache_key = $1 AND action = $2 AND expires_at > NOW()`,
-      [cacheKey, action]
+      `SELECT cache_key, action, data, created_at, expires_at, expires_at <= NOW() AS is_expired
+       FROM api_cache
+       WHERE cache_key = $1 AND action = $2
+         AND ($3::boolean = TRUE OR expires_at > NOW())
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [cacheKey, action, includeExpired]
     );
 
     if (result.rows.length > 0) {
-      console.log(`[Cache] HIT para ${cacheKey}`);
-      return result.rows[0].data;
+      const row = result.rows[0];
+      console.log(`[Cache] ${row.is_expired ? "STALE" : "HIT"} para ${cacheKey}`);
+      return {
+        data: row.data,
+        cacheKey: row.cache_key,
+        action: row.action,
+        createdAt: row.created_at,
+        expiresAt: row.expires_at,
+        isExpired: row.is_expired,
+      };
     }
 
     console.log(`[Cache] MISS para ${cacheKey}`);
@@ -99,6 +123,17 @@ export async function getCache(
 }
 
 /**
+ * Obtiene un dato del cache si existe y no ha expirado
+ */
+export async function getCache(
+  action: string,
+  params: Record<string, unknown>
+): Promise<unknown | null> {
+  const entry = await getCacheEntry(action, params, false);
+  return entry?.data ?? null;
+}
+
+/**
  * Guarda un dato en el cache con TTL
  */
 export async function setCache(
@@ -107,10 +142,10 @@ export async function setCache(
   data: unknown,
   ttlMinutes: number
 ): Promise<void> {
-  try {
-    const cacheKey = generateCacheKey(action, params);
-    const expiresAt = new Date(Date.now() + ttlMinutes * 60 * 1000).toISOString();
+  const cacheKey = generateCacheKey(action, params);
+  const expiresAt = new Date(Date.now() + ttlMinutes * 60 * 1000).toISOString();
 
+  try {
     await query(
       `INSERT INTO api_cache (cache_key, action, data, expires_at)
        VALUES ($1, $2, $3, $4)
@@ -118,12 +153,22 @@ export async function setCache(
        DO UPDATE SET data = EXCLUDED.data, expires_at = EXCLUDED.expires_at, created_at = NOW()`,
       [cacheKey, action, JSON.stringify(data), expiresAt]
     );
-
-    console.log(`[Cache] GUARDADO ${cacheKey} (TTL: ${ttlMinutes}m)`);
   } catch (error) {
     console.error("[Cache] Error al guardar cache:", error);
-    // No lanzamos error para no afectar la respuesta API
+    return;
   }
+
+  try {
+    await query(
+      `INSERT INTO api_cache_snapshots (cache_key, action, data, expires_at)
+       VALUES ($1, $2, $3, $4)`,
+      [cacheKey, action, JSON.stringify(data), expiresAt]
+    );
+  } catch (error) {
+    console.warn("[Cache] No se pudo guardar snapshot histórico:", error);
+  }
+
+  console.log(`[Cache] GUARDADO ${cacheKey} (TTL: ${ttlMinutes}m)`);
 }
 
 /**

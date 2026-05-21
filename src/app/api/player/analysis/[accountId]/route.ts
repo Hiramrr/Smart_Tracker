@@ -165,6 +165,8 @@ interface RankedSeason {
   globalRanking: number | null;
   rankValue: number; // numérico para gráficas
   highestRankValue: number;
+  rankScore: number; // escala fina: Bronce I=1 ... Unreal=18, con progreso decimal
+  highestRankScore: number;
 }
 
 interface SnapshotRecord {
@@ -174,6 +176,14 @@ interface SnapshotRecord {
   kills: number;
   score_per_match: number;
   created_at: string;
+}
+
+interface ClassificationStats {
+  kd: number;
+  wr: number;
+  kpm: number;
+  matches: number;
+  source: string;
 }
 
 interface ProgressItem {
@@ -697,6 +707,17 @@ const RANK_VALUES: Record<string, number> = {
   "unreal": 8,
 };
 
+const RANK_BASE_SCORES: Record<string, number> = {
+  "bronze": 1, "bronce": 1,
+  "silver": 4, "plata": 4,
+  "gold": 7, "oro": 7,
+  "platinum": 10, "platino": 10,
+  "diamond": 13, "diamante": 13,
+  "elite": 16, "élite": 16,
+  "champion": 17, "campeon": 17, "campeón": 17, "as": 17, "ace": 17,
+  "unreal": 18,
+};
+
 function rankNameToValue(name: string): number {
   if (!name) return 0;
   const lower = name.toLowerCase().trim();
@@ -709,18 +730,62 @@ function rankNameToValue(name: string): number {
   return 0;
 }
 
+function rankNameToScore(name: string, progress: number | null = null): number {
+  if (!name) return 0;
+  const lower = normalizeRankText(name);
+  const rankKey = Object.keys(RANK_BASE_SCORES).find((key) => lower.includes(key));
+  if (!rankKey) return 0;
+
+  const base = RANK_BASE_SCORES[rankKey];
+  if (base >= 16) return base;
+
+  const division = extractDivisionStep(lower);
+  const boundedProgress = Math.max(0, Math.min(progress ?? 0, 100)) / 100;
+  return base + division + boundedProgress;
+}
+
+function scoreToRankName(score: number): string {
+  const rounded = Math.max(1, Math.min(18, score));
+  if (rounded >= 18) return "Unreal";
+  if (rounded >= 17) return "Campeon";
+  if (rounded >= 16) return "Elite";
+
+  const tierIndex = Math.floor(rounded - 1);
+  const tier = Math.floor(tierIndex / 3);
+  const division = (tierIndex % 3) + 1;
+  const tierNames = ["Bronce", "Plata", "Oro", "Platino", "Diamante"];
+  return `${tierNames[tier] || "Bronce"} ${divisionToRoman(division)}`;
+}
+
+function normalizeRankText(value: string): string {
+  return value
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim();
+}
+
+function extractDivisionStep(normalizedRank: string): number {
+  if (/\b(iii|3)\b/.test(normalizedRank)) return 2;
+  if (/\b(ii|2)\b/.test(normalizedRank)) return 1;
+  return 0;
+}
+
+function divisionToRoman(value: number): string {
+  return value === 3 ? "III" : value === 2 ? "II" : "I";
+}
+
 function parseRankedHistory(ranksData: unknown, modeCategory: "br" | "reload"): RankedSeason[] {
   if (!ranksData) return [];
   
-  const ranksRecord = asRecord(ranksData);
-  const modes = asRecordArray(ranksRecord.modes || ranksData);
+  const modes = extractRankedModes(ranksData);
 
   if (modes.length === 0) return [];
 
   // Definir qué rankingTypes aceptamos para cada categoría y su prioridad
   const CATEGORY_MAP: Record<string, string[]> = {
-    "br": ["ranked-br-combined", "ranked-br", "br"],
-    "reload": ["ranked-blastberry-combined", "ranked-blastberry", "blastberry"]
+    "br": ["ranked-br-combined", "ranked-br", "ranked-zb-combined", "ranked-zb", "br", "zb"],
+    "reload": ["ranked-blastberry-combined", "ranked-blastberry", "ranked-reload-combined", "ranked-reload", "blastberry", "reload"]
   };
 
   const allowedTypes = CATEGORY_MAP[modeCategory] || [];
@@ -730,7 +795,7 @@ function parseRankedHistory(ranksData: unknown, modeCategory: "br" | "reload"): 
 
   for (const mode of modes) {
     if (!mode) continue;
-    const rankingType = asText(mode.rankingType) || "";
+    const rankingType = (asText(mode.rankingType) || "").toLowerCase();
     
     // Verificar si el tipo pertenece a la categoría buscada
     const typeIndex = allowedTypes.indexOf(rankingType);
@@ -747,9 +812,9 @@ function parseRankedHistory(ranksData: unknown, modeCategory: "br" | "reload"): 
       const currentDivRecord = asRecord(currentDiv);
       const highestDivRecord = asRecord(highestDiv);
       const currentName = typeof currentDiv === "string" ? currentDiv
-        : asText(currentDivRecord.divisionName) || asText(currentDivRecord.name) || "";
+        : asText(currentDivRecord.divisionName) || asText(currentDivRecord.name) || asText(currentDivRecord.displayName) || "";
       const highestName = typeof highestDiv === "string" ? highestDiv
-        : asText(highestDivRecord.divisionName) || asText(highestDivRecord.name) || "";
+        : asText(highestDivRecord.divisionName) || asText(highestDivRecord.name) || asText(highestDivRecord.displayName) || "";
 
       if (!currentName && !highestName) continue;
 
@@ -766,6 +831,8 @@ function parseRankedHistory(ranksData: unknown, modeCategory: "br" | "reload"): 
       const trackId = asText(m.rankingTrackId) || asText(m.trackId) || "unknown";
       const currentName = asText(m.currentName) || "";
       const highestName = asText(m.highestName) || "";
+      const progress = firstNumber(m, ["promotionProgress", "currentProgress", "progress", "percentage"]) || 0;
+      const highestProgress = highestName && highestName === currentName ? progress : 100;
     return {
       trackId,
       seasonLabel: formatTrackId(trackId),
@@ -776,6 +843,8 @@ function parseRankedHistory(ranksData: unknown, modeCategory: "br" | "reload"): 
       globalRanking: toNumber(m.currentPlayerRanking),
       rankValue: rankNameToValue(currentName),
       highestRankValue: rankNameToValue(highestName || currentName),
+      rankScore: rankNameToScore(currentName, progress),
+      highestRankScore: rankNameToScore(highestName || currentName, highestProgress),
     };
   });
 
@@ -789,6 +858,29 @@ function parseRankedHistory(ranksData: unknown, modeCategory: "br" | "reload"): 
     }
     return a.trackId.localeCompare(b.trackId);
   });
+}
+
+function extractRankedModes(ranksData: unknown): Record<string, unknown>[] {
+  const root = asRecord(ranksData);
+  const data = asRecord(root.data);
+  const candidates = [
+    ranksData,
+    root.modes,
+    root.ranks,
+    root.rankings,
+    root.accountRanks,
+    data.modes,
+    data.ranks,
+    data.rankings,
+    data.accountRanks,
+  ];
+
+  for (const candidate of candidates) {
+    const modes = asRecordArray(candidate);
+    if (modes.length > 0) return modes;
+  }
+
+  return [];
 }
 
 function formatTrackId(trackId: string): string {
@@ -851,8 +943,48 @@ async function getSnapshots(accountId: string): Promise<SnapshotRecord[]> {
 
 // ═══════════════════════════════════════════
 // Clasificación estricta (6 niveles)
-// Considera KD, WR, y rango ranked actual
+// Considera stats BR season/lifetime, rango ranked e historial competitivo.
 // ═══════════════════════════════════════════
+
+function buildClassificationStats(lifetime: ModeStats | null, season: ModeStats | null): ClassificationStats {
+  const lifetimeMatches = lifetime?.matches || 0;
+  const seasonMatches = season?.matches || 0;
+
+  if (!season && !lifetime) {
+    return { kd: 0, wr: 0, kpm: 0, matches: 0, source: "sin stats publicas" };
+  }
+
+  if (!lifetime || lifetimeMatches === 0) {
+    return {
+      kd: season?.kd || 0,
+      wr: season?.winRate || 0,
+      kpm: season?.killsPerMatch || 0,
+      matches: seasonMatches,
+      source: `temporada (${seasonMatches} partidas)`,
+    };
+  }
+
+  if (!season || seasonMatches < 10) {
+    return {
+      kd: lifetime.kd,
+      wr: lifetime.winRate,
+      kpm: lifetime.killsPerMatch,
+      matches: lifetimeMatches,
+      source: `lifetime (${lifetimeMatches} partidas)`,
+    };
+  }
+
+  const seasonWeight = seasonMatches >= 100 ? 0.7 : seasonMatches >= 50 ? 0.6 : 0.45;
+  const lifetimeWeight = 1 - seasonWeight;
+
+  return {
+    kd: season.kd * seasonWeight + lifetime.kd * lifetimeWeight,
+    wr: season.winRate * seasonWeight + lifetime.winRate * lifetimeWeight,
+    kpm: season.killsPerMatch * seasonWeight + lifetime.killsPerMatch * lifetimeWeight,
+    matches: seasonMatches,
+    source: `season/lifetime (${seasonMatches}/${lifetimeMatches} partidas)`,
+  };
+}
 
 function classifyStrict(
   lifetime: ModeStats | null,
@@ -860,9 +992,10 @@ function classifyStrict(
   rankedHistory: RankedSeason[],
   tournamentProfile: TournamentProfile
 ): { level: string; value: number; description: string; tier: string } {
-  const kd = season?.kd || lifetime?.kd || 0;
-  const wr = season?.winRate || lifetime?.winRate || 0;
-  const kpm = season?.killsPerMatch || lifetime?.killsPerMatch || 0;
+  const stats = buildClassificationStats(lifetime, season);
+  const kd = stats.kd;
+  const wr = stats.wr;
+  const kpm = stats.kpm;
 
   // Factor de rango ranked (si tiene historial)
   const latestRank = rankedHistory.length > 0 ? rankedHistory[rankedHistory.length - 1] : null;
@@ -898,7 +1031,7 @@ function classifyStrict(
       level: "Competitivo",
       value: 4,
       tier: "A",
-      description: `Competitivo: mejor #${best ?? "N/D"}, eventos ${tournamentProfile.events}, KD ${kd.toFixed(2)}`,
+      description: `Competitivo: mejor #${best ?? "N/D"}, eventos ${tournamentProfile.events}, KD ${kd.toFixed(2)} (${stats.source})`,
     };
   }
 
@@ -911,32 +1044,32 @@ function classifyStrict(
   // Principiante: KD < 0.5
 
   if (rankBonus >= 8 && globalRanking !== null && globalRanking > 0 && globalRanking <= 10000) {
-    return { level: "Competitivo", value: 4, tier: "A", description: `Rango Unreal top ${globalRanking.toLocaleString("es-MX")}, KD ${kd.toFixed(2)}` };
+    return { level: "Competitivo", value: 4, tier: "A", description: `Rango Unreal top ${globalRanking.toLocaleString("es-MX")}, KD ${kd.toFixed(2)} (${stats.source})` };
   }
   if (kd >= 8 && wr >= 35 && rankBonus >= 8) {
-    return { level: "Elite / Pro", value: 5, tier: "S", description: `KD ${kd.toFixed(2)}, WR ${wr.toFixed(1)}%, Rango: ${latestRank?.currentRank || "Unreal"}` };
+    return { level: "Elite / Pro", value: 5, tier: "S", description: `KD ${kd.toFixed(2)}, WR ${wr.toFixed(1)}%, Rango: ${latestRank?.currentRank || "Unreal"} (${stats.source})` };
   }
   if (kd >= 8 && wr >= 30) {
-    return { level: "Elite / Pro", value: 5, tier: "S", description: `KD ${kd.toFixed(2)}, WR ${wr.toFixed(1)}%` };
+    return { level: "Elite / Pro", value: 5, tier: "S", description: `KD ${kd.toFixed(2)}, WR ${wr.toFixed(1)}% (${stats.source})` };
   }
   if (kd >= 4 && wr >= 18 && rankBonus >= 7) {
-    return { level: "Competitivo", value: 4, tier: "A", description: `KD ${kd.toFixed(2)}, WR ${wr.toFixed(1)}%, Rango: ${latestRank?.currentRank || "Champion"}` };
+    return { level: "Competitivo", value: 4, tier: "A", description: `KD ${kd.toFixed(2)}, WR ${wr.toFixed(1)}%, Rango: ${latestRank?.currentRank || "Champion"} (${stats.source})` };
   }
   if (kd >= 4 && wr >= 15) {
-    return { level: "Competitivo", value: 4, tier: "A", description: `KD ${kd.toFixed(2)}, WR ${wr.toFixed(1)}%` };
+    return { level: "Competitivo", value: 4, tier: "A", description: `KD ${kd.toFixed(2)}, WR ${wr.toFixed(1)}% (${stats.source})` };
   }
   if ((kd >= 2 && wr >= 7) || (score >= 36 && tournamentProfile.top1000 >= 2) || (rankBonus >= 6 && kpm >= 2)) {
     const rankLabel = latestRank ? `, Rango: ${latestRank.currentRank}` : "";
     const tournamentLabel = tournamentProfile.events > 0 ? `, mejor #${best}` : "";
-    return { level: "Avanzado", value: 3, tier: "B", description: `KD ${kd.toFixed(2)}, WR ${wr.toFixed(1)}%${rankLabel}${tournamentLabel}` };
+    return { level: "Avanzado", value: 3, tier: "B", description: `KD ${kd.toFixed(2)}, WR ${wr.toFixed(1)}%${rankLabel}${tournamentLabel} (${stats.source})` };
   }
   if (kd >= 1 && wr >= 2.5) {
-    return { level: "Intermedio", value: 2, tier: "C", description: `KD ${kd.toFixed(2)}, WR ${wr.toFixed(1)}%` };
+    return { level: "Intermedio", value: 2, tier: "C", description: `KD ${kd.toFixed(2)}, WR ${wr.toFixed(1)}% (${stats.source})` };
   }
   if (kd >= 0.5) {
-    return { level: "Casual", value: 1, tier: "D", description: `KD ${kd.toFixed(2)}, WR ${wr.toFixed(1)}%` };
+    return { level: "Casual", value: 1, tier: "D", description: `KD ${kd.toFixed(2)}, WR ${wr.toFixed(1)}% (${stats.source})` };
   }
-  return { level: "Principiante", value: 0, tier: "E", description: `KD ${kd.toFixed(2)}, WR ${wr.toFixed(1)}%` };
+  return { level: "Principiante", value: 0, tier: "E", description: `KD ${kd.toFixed(2)}, WR ${wr.toFixed(1)}% (${stats.source})` };
 }
 
 // ═══════════════════════════════════════════
@@ -971,38 +1104,44 @@ function predictNextRank(history: RankedSeason[]): {
   confidence: string;
   reasoning: string;
 } {
-  if (history.length < 2) {
+  const values = history
+    .map(h => h.highestRankScore || h.rankScore || h.highestRankValue || h.rankValue)
+    .filter((value) => Number.isFinite(value) && value > 0);
+
+  if (values.length < 2) {
     return { predictedRank: null, predictedRankValue: null, confidence: "low", reasoning: "Insuficientes temporadas" };
   }
 
-  const values = history.map(h => h.highestRankValue || h.rankValue);
   const n = values.length;
   const x = Array.from({ length: n }, (_, i) => i);
   const slope = linSlope(x, values);
+  const recentDeltas = values.slice(Math.max(1, n - 4)).map((value, index, recent) => {
+    const previousIndex = Math.max(0, n - recent.length + index - 1);
+    return value - values[previousIndex];
+  });
+  const recentSlope = average(recentDeltas);
+  const blendedSlope = slope * 0.65 + recentSlope * 0.35;
 
-  // Predecir siguiente valor
-  const nextVal = Math.round(Math.max(1, Math.min(8, values[n - 1] + slope)));
-  
-  const rankNames: Record<number, string> = {
-    1: "Bronce", 2: "Plata", 3: "Oro", 4: "Platino",
-    5: "Diamante", 6: "Elite", 7: "Campeón", 8: "Unreal",
-  };
+  // Predecir siguiente valor en escala fina: Bronce I=1 ... Unreal=18.
+  const nextVal = Math.max(1, Math.min(18, values[n - 1] + blendedSlope));
 
   // Confianza basada en consistencia
-  const variance = values.reduce((acc, v) => acc + Math.pow(v - (values.reduce((a, b) => a + b, 0) / n), 2), 0) / n;
-  const confidence = variance < 1 ? "alta" : variance < 3 ? "media" : "baja";
+  const intercept = average(values) - slope * average(x);
+  const meanError = average(values.map((value, index) => Math.abs(value - (slope * index + intercept))));
+  const confidence = n >= 4 && meanError < 0.75 ? "alta" : n >= 3 && meanError < 1.5 ? "media" : "baja";
 
   // Razonamiento
   let reasoning = "";
-  if (slope > 0.3) reasoning = `Tendencia ascendente: +${slope.toFixed(1)} rangos por temporada`;
-  else if (slope < -0.3) reasoning = `Tendencia descendente: ${slope.toFixed(1)} rangos por temporada`;
-  else reasoning = `Rango estable en las últimas ${n} temporadas`;
+  if (blendedSlope > 0.35) reasoning = `Tendencia ascendente: +${blendedSlope.toFixed(1)} niveles por temporada`;
+  else if (blendedSlope < -0.35) reasoning = `Tendencia descendente: ${blendedSlope.toFixed(1)} niveles por temporada`;
+  else reasoning = `Rango estable en las ultimas ${n} temporadas`;
 
-  const current = rankNames[values[n - 1]] || "Desconocido";
-  const predicted = rankNames[nextVal] || "Desconocido";
+  const current = scoreToRankName(values[n - 1]);
+  const predicted = scoreToRankName(nextVal);
   if (current !== predicted) {
-    reasoning += `. De ${current} → ${predicted}`;
+    reasoning += `. De ${current} a ${predicted}`;
   }
+  reasoning += `. Basado en ${n} temporadas ranked historicas de Osirion`;
 
   return { predictedRank: predicted, predictedRankValue: nextVal, confidence, reasoning };
 }
@@ -1080,7 +1219,7 @@ function buildRichProgress(opts: {
     progress.push({
       metric_name: "ranked_history", metric_value: r.highestRankValue, delta: r.rankValue,
       period_start: r.seasonLabel, created_at: new Date().toISOString(),
-      _extra: { currentRank: r.currentRank, highestRank: r.highestRank, progress: r.progress, globalRanking: r.globalRanking, trackId: r.trackId },
+      _extra: { currentRank: r.currentRank, highestRank: r.highestRank, progress: r.progress, globalRanking: r.globalRanking, trackId: r.trackId, rankingType: r.rankingType, rankScore: r.rankScore, highestRankScore: r.highestRankScore },
     });
   }
 
@@ -1089,7 +1228,7 @@ function buildRichProgress(opts: {
     progress.push({
       metric_name: "ranked_history_reload", metric_value: r.highestRankValue, delta: r.rankValue,
       period_start: r.seasonLabel, created_at: new Date().toISOString(),
-      _extra: { currentRank: r.currentRank, highestRank: r.highestRank, progress: r.progress, globalRanking: r.globalRanking, trackId: r.trackId },
+      _extra: { currentRank: r.currentRank, highestRank: r.highestRank, progress: r.progress, globalRanking: r.globalRanking, trackId: r.trackId, rankingType: r.rankingType, rankScore: r.rankScore, highestRankScore: r.highestRankScore },
     });
   }
 

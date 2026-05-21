@@ -308,7 +308,7 @@ async function fetchTournamentPages(opts: {
     .slice(0, opts.maxEvents);
 }
 
-import { query, getCache, setCache, getCacheTtl } from "@/lib/db";
+import { query, getCache, getCacheEntry, setCache, getCacheTtl, type ApiCacheEntry } from "@/lib/db";
 
 /**
  * Publica un evento en la base de datos (inicia el patrón Outbox)
@@ -366,7 +366,34 @@ async function logApiCall(
 /**
  * Construye la respuesta transformada según la acción
  */
-function buildResponse(action: string, data: unknown, status: number): NextResponse {
+type CacheResponseOptions = {
+  cached?: boolean;
+  stale?: boolean;
+  cacheStatus?: "fresh" | "stale";
+  cacheCreatedAt?: string;
+  cacheExpiresAt?: string;
+  fallbackReason?: string;
+};
+
+function cacheMeta(options: CacheResponseOptions) {
+  return {
+    stale: options.stale ?? false,
+    buffered: options.stale ?? false,
+    cacheStatus: options.cacheStatus ?? (options.cached ? "fresh" : "live"),
+    cacheCreatedAt: options.cacheCreatedAt,
+    cacheExpiresAt: options.cacheExpiresAt,
+    fallbackReason: options.fallbackReason,
+  };
+}
+
+function buildResponse(
+  action: string,
+  data: unknown,
+  status: number,
+  options: CacheResponseOptions = { cached: true, cacheStatus: "fresh" }
+): NextResponse {
+  const cached = options.cached ?? true;
+
   if (action === "ranked-current" && status === 200) {
     const modes: RankedMode[] = Array.isArray((data as Record<string, unknown>)?.modes)
       ? ((data as Record<string, unknown>).modes as RankedMode[])
@@ -390,7 +417,8 @@ function buildResponse(action: string, data: unknown, status: number): NextRespo
 
     return NextResponse.json({
       success: true,
-      cached: true,
+      cached,
+      ...cacheMeta(options),
       rank: selectedMode
         ? {
             rankingType: selectedMode.rankingType,
@@ -407,13 +435,14 @@ function buildResponse(action: string, data: unknown, status: number): NextRespo
   }
 
   if ((action === "tracker-stats" || action === "fortnite-api-stats") && status === 200) {
-    return NextResponse.json({ success: true, cached: true, data });
+    return NextResponse.json({ success: true, cached, ...cacheMeta(options), data });
   }
 
   if (action === "tournaments" && status === 200) {
     return NextResponse.json({
       success: true,
-      cached: true,
+      cached,
+      ...cacheMeta(options),
       tournaments: (data as Record<string, unknown>)?.events ||
                   (data as Record<string, unknown>)?.tournaments ||
                   data,
@@ -423,7 +452,8 @@ function buildResponse(action: string, data: unknown, status: number): NextRespo
   if (action === "leaderboard" && status === 200) {
     return NextResponse.json({
       success: true,
-      cached: true,
+      cached,
+      ...cacheMeta(options),
       leaderboard: (data as Record<string, unknown>)?.leaderboard || data,
     });
   }
@@ -431,7 +461,8 @@ function buildResponse(action: string, data: unknown, status: number): NextRespo
   if (action === "tournament-player-stats" && status === 200) {
     return NextResponse.json({
       success: true,
-      cached: true,
+      cached,
+      ...cacheMeta(options),
       players: getPlayers(data),
       data,
     });
@@ -440,22 +471,29 @@ function buildResponse(action: string, data: unknown, status: number): NextRespo
   if (action === "player-tournament-placements" && status === 200) {
     return NextResponse.json({
       success: true,
-      cached: true,
       ...(asRecord(data)),
+      cached,
+      ...cacheMeta(options),
     });
   }
 
   if (action === "shop" && status === 200) {
     return NextResponse.json({
       success: true,
-      cached: true,
+      cached,
+      ...cacheMeta(options),
       shop: (data as Record<string, unknown>)?.data || data,
     });
   }
 
   // Respuesta genérica para lookup y stats
   if (status === 200) {
-    return NextResponse.json({ ...data as Record<string, unknown>, success: true, cached: true });
+    return NextResponse.json({
+      ...data as Record<string, unknown>,
+      success: true,
+      cached,
+      ...cacheMeta(options),
+    });
   }
 
   return NextResponse.json(data, { status });
@@ -465,8 +503,25 @@ export async function GET(req: NextRequest) {
   const startTime = Date.now();
   const { searchParams } = new URL(req.url);
   const action = searchParams.get("action");
+  const actionName = action || "unknown";
   let url = "";
   let cacheParams: Record<string, unknown> = {};
+  let bufferedCache: ApiCacheEntry | null = null;
+
+  async function returnBufferedResponse(reason: string) {
+    if (!bufferedCache || !action) return null;
+
+    console.warn(`[API] Buffer fallback para ${action}: ${reason}`);
+    await logApiCall(req, actionName, url, startTime, 200, bufferedCache.data, true);
+    return buildResponse(action, bufferedCache.data, 200, {
+      cached: true,
+      stale: true,
+      cacheStatus: "stale",
+      cacheCreatedAt: bufferedCache.createdAt,
+      cacheExpiresAt: bufferedCache.expiresAt,
+      fallbackReason: reason,
+    });
+  }
 
   try {
     switch (action) {
@@ -507,13 +562,6 @@ export async function GET(req: NextRequest) {
             { status: 400 }
           );
         }
-        if (!TRACKER_API_KEY) {
-          await logApiCall(req, action || "unknown", "", startTime, 503, null, false);
-          return NextResponse.json(
-            { success: false, error: "TRACKER_API_KEY no configurada" },
-            { status: 503 }
-          );
-        }
         const platform = searchParams.get("platform") || "epic";
         url = `${TRACKER_BASE}/standard/profile/${encodeURIComponent(platform)}/${encodeURIComponent(displayName)}`;
         cacheParams = { displayName, platform };
@@ -528,13 +576,6 @@ export async function GET(req: NextRequest) {
           return NextResponse.json(
             { success: false, error: "accountId o displayName es requerido" },
             { status: 400 }
-          );
-        }
-        if (!FORTNITE_API_KEY) {
-          await logApiCall(req, action || "unknown", "", startTime, 503, null, false);
-          return NextResponse.json(
-            { success: false, error: "FORTNITE_API_KEY no configurada" },
-            { status: 503 }
           );
         }
         const params = new URLSearchParams({
@@ -649,13 +690,6 @@ export async function GET(req: NextRequest) {
       }
       case "shop": {
         const lang = searchParams.get("lang") || "es-419";
-        if (!FORTNITE_API_KEY) {
-          await logApiCall(req, action || "unknown", "", startTime, 503, null, false);
-          return NextResponse.json(
-            { success: false, error: "FORTNITE_API_KEY no configurada" },
-            { status: 503 }
-          );
-        }
         url = `${FORTNITE_API_BASE}/shop?language=${encodeURIComponent(lang)}`;
         cacheParams = { lang };
         break;
@@ -673,11 +707,37 @@ export async function GET(req: NextRequest) {
     // CACHE-ASIDE PATTERN
     // 1. Intentar obtener del cache
     // ==========================================
-    const cachedData = await getCache(action || "unknown", cacheParams);
+    const cachedData = await getCache(actionName, cacheParams);
     if (cachedData) {
       console.log(`[API] Cache HIT para ${action}`);
-      await logApiCall(req, action || "unknown", url, startTime, 200, cachedData, true);
-      return buildResponse(action || "unknown", cachedData, 200);
+      await logApiCall(req, actionName, url, startTime, 200, cachedData, true);
+      return buildResponse(actionName, cachedData, 200, {
+        cached: true,
+        stale: false,
+        cacheStatus: "fresh",
+      });
+    }
+
+    bufferedCache = await getCacheEntry(actionName, cacheParams, true);
+
+    if (action === "tracker-stats" && !TRACKER_API_KEY) {
+      const bufferedResponse = await returnBufferedResponse("TRACKER_API_KEY no configurada");
+      if (bufferedResponse) return bufferedResponse;
+      await logApiCall(req, actionName, "", startTime, 503, null, false);
+      return NextResponse.json(
+        { success: false, error: "TRACKER_API_KEY no configurada" },
+        { status: 503 }
+      );
+    }
+
+    if ((action === "fortnite-api-stats" || action === "shop") && !FORTNITE_API_KEY) {
+      const bufferedResponse = await returnBufferedResponse("FORTNITE_API_KEY no configurada");
+      if (bufferedResponse) return bufferedResponse;
+      await logApiCall(req, actionName, "", startTime, 503, null, false);
+      return NextResponse.json(
+        { success: false, error: "FORTNITE_API_KEY no configurada" },
+        { status: 503 }
+      );
     }
 
     // ==========================================
@@ -792,14 +852,19 @@ export async function GET(req: NextRequest) {
     // 3. Guardar en cache si la respuesta fue exitosa
     // ==========================================
     if (response.ok) {
-      const ttl = getCacheTtl(action || "unknown");
-      await setCache(action || "unknown", cacheParams, data, ttl);
+      const ttl = getCacheTtl(actionName);
+      await setCache(actionName, cacheParams, data, ttl);
     }
 
     // ==========================================
     // 4. Publicar evento en Kafka
     // ==========================================
-    await logApiCall(req, action || "unknown", url, startTime, response.status, data, false);
+    await logApiCall(req, actionName, url, startTime, response.status, data, false);
+
+    if (!response.ok && response.status !== 404) {
+      const bufferedResponse = await returnBufferedResponse(`api_status_${response.status}`);
+      if (bufferedResponse) return bufferedResponse;
+    }
 
     // ==========================================
     // 5. Construir respuesta (sin cache)
@@ -873,7 +938,10 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(data, { status });
   } catch (error: unknown) {
     // Publicar evento de error en Kafka
-    await logApiCall(req, action || "unknown", url, startTime, 500, { error: getErrorMessage(error) }, false);
+    await logApiCall(req, actionName, url, startTime, 500, { error: getErrorMessage(error) }, false);
+
+    const bufferedResponse = await returnBufferedResponse(getErrorMessage(error));
+    if (bufferedResponse) return bufferedResponse;
 
     return NextResponse.json(
       { success: false, error: getErrorMessage(error) },

@@ -59,6 +59,9 @@ export async function GET() {
     const cosmeticsCountResult = await query("SELECT COUNT(*) as total FROM cosmetics");
     const cosmeticAppearancesCountResult = await query("SELECT COUNT(*) as total FROM cosmetic_shop_appearances");
     const dailyShopSnapshotsCountResult = await query("SELECT COUNT(*) as total FROM daily_shop_snapshots");
+    const cacheEntriesCountResult = await query("SELECT COUNT(*) as total FROM api_cache");
+    const staleCacheEntriesCountResult = await query("SELECT COUNT(*) as total FROM api_cache WHERE expires_at <= NOW()");
+    const cacheSnapshotsCountResult = await query("SELECT COUNT(*) as total FROM api_cache_snapshots");
 
     // Estadísticas por hora (últimas 24 horas)
     const hourlyResult = await query(
@@ -94,6 +97,11 @@ export async function GET() {
           cosmetics: parseInt(cosmeticsCountResult.rows[0].total, 10),
           cosmeticAppearances: parseInt(cosmeticAppearancesCountResult.rows[0].total, 10),
           dailySnapshots: parseInt(dailyShopSnapshotsCountResult.rows[0].total, 10)
+        },
+        cache: {
+          entries: parseInt(cacheEntriesCountResult.rows[0].total, 10),
+          staleEntries: parseInt(staleCacheEntriesCountResult.rows[0].total, 10),
+          snapshots: parseInt(cacheSnapshotsCountResult.rows[0].total, 10)
         },
         progress: {
           recent: await (async () => {

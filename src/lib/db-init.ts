@@ -211,6 +211,20 @@ export async function initializeDatabase(): Promise<void> {
       await client.query(`CREATE INDEX IF NOT EXISTS idx_api_cache_key_action ON api_cache(cache_key, action)`);
       await client.query(`CREATE INDEX IF NOT EXISTS idx_api_cache_expires ON api_cache(expires_at)`);
 
+      // Historial append-only de respuestas cacheadas exitosas
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS api_cache_snapshots (
+          id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+          cache_key VARCHAR(500) NOT NULL,
+          action VARCHAR(100) NOT NULL,
+          data JSONB NOT NULL,
+          expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+          captured_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        )
+      `);
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_api_cache_snapshots_key_action ON api_cache_snapshots(cache_key, action)`);
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_api_cache_snapshots_captured ON api_cache_snapshots(captured_at)`);
+
       // Tabla tournament_images
       await client.query(`
         CREATE TABLE IF NOT EXISTS tournament_images (
