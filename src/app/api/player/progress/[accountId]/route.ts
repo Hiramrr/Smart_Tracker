@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { query } from "@/lib/db";
+import { ensureDatabaseInitialized } from "@/lib/init";
 
 export async function GET(
   request: Request,
@@ -8,8 +9,14 @@ export async function GET(
   const { accountId } = await params;
 
   try {
+    await ensureDatabaseInitialized();
     const result = await query(
-      `SELECT metric_name, metric_value, delta, period_start, created_at 
+      `SELECT
+         metric_name,
+         metric_value,
+         delta,
+         COALESCE(period_label, period_start::text) AS period_start,
+         created_at
        FROM player_progress 
        WHERE account_id = $1 
        ORDER BY created_at DESC 

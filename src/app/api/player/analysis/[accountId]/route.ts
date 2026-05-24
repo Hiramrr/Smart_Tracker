@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { query } from "@/lib/db";
+import { ensureDatabaseInitialized } from "@/lib/init";
 
 const OSIRION_BASE = "https://fnapi.osirion.gg/v1";
 const FORTNITE_API_BASE = "https://fortnite-api.com/v2";
@@ -71,13 +72,16 @@ export async function GET(
     // 3. Guardar snapshot + obtener historial
     // ═══════════════════════════════════════════
     let snapshots: SnapshotRecord[] = [];
+    let storedProgress: ProgressItem[] = [];
     let savedSnapshot = false;
     try {
+      await ensureDatabaseInitialized();
       if (overallLifetime) {
         await saveSnapshot(accountId, overallLifetime, overallSeason);
         savedSnapshot = true;
       }
       snapshots = await getSnapshots(accountId);
+      storedProgress = await getStoredProgress(accountId);
     } catch (dbErr) {
       console.warn("[Analysis] DB no disponible:", dbErr);
     }
@@ -109,6 +113,7 @@ export async function GET(
       overallLifetime,
       rankedHistoryBR,
       rankedHistoryReload,
+      storedProgress,
       tournamentProfile,
       tournamentPlacements: tournamentHistory.placements,
       snapshots,
@@ -159,6 +164,7 @@ interface RankedSeason {
   trackId: string;
   seasonLabel: string;
   rankingType: string;
+  lastUpdatedAt: string | null;
   currentRank: string;
   highestRank: string;
   progress: number;
@@ -782,31 +788,21 @@ function parseRankedHistory(ranksData: unknown, modeCategory: "br" | "reload"): 
 
   if (modes.length === 0) return [];
 
-  // Definir qué rankingTypes aceptamos para cada categoría y su prioridad
-  const CATEGORY_MAP: Record<string, string[]> = {
-    "br": ["ranked-br-combined", "ranked-br", "ranked-zb-combined", "ranked-zb", "br", "zb"],
-    "reload": ["ranked-blastberry-combined", "ranked-blastberry", "ranked-reload-combined", "ranked-reload", "blastberry", "reload"]
-  };
-
-  const allowedTypes = CATEGORY_MAP[modeCategory] || [];
-  
   // Agrupar por trackId para quedarnos con el mejor rankingType disponible por temporada
   const byTrack = new Map<string, Record<string, unknown>>();
 
   for (const mode of modes) {
     if (!mode) continue;
     const rankingType = (asText(mode.rankingType) || "").toLowerCase();
-    
-    // Verificar si el tipo pertenece a la categoría buscada
-    const typeIndex = allowedTypes.indexOf(rankingType);
-    if (typeIndex === -1) continue;
-
     const trackId = asText(mode.rankingTrackId) || asText(mode.trackId) || "unknown";
-    
+
+    const typeIndex = rankedModePriority(rankingType, trackId, modeCategory);
+    if (typeIndex === null) continue;
+
     // Si ya tenemos este track, solo sobrescribir si el nuevo tiene mayor prioridad (menor índice en allowedTypes)
     const existing = byTrack.get(trackId);
-    const existingRankingType = existing ? asText(existing.rankingType) || "" : "";
-    if (!existing || typeIndex < allowedTypes.indexOf(existingRankingType)) {
+    const existingPriority = typeof existing?.priority === "number" ? existing.priority : Number.POSITIVE_INFINITY;
+    if (!existing || typeIndex < existingPriority) {
       const currentDiv = mode.currentDivision;
       const highestDiv = mode.highestDivision;
       const currentDivRecord = asRecord(currentDiv);
@@ -837,6 +833,7 @@ function parseRankedHistory(ranksData: unknown, modeCategory: "br" | "reload"): 
       trackId,
       seasonLabel: formatTrackId(trackId),
       rankingType: asText(m.rankingType) || "",
+      lastUpdatedAt: asText(m.lastUpdatedAt),
       currentRank: currentName,
       highestRank: highestName || currentName,
       progress: toNumber(m.promotionProgress) || 0,
@@ -850,14 +847,43 @@ function parseRankedHistory(ranksData: unknown, modeCategory: "br" | "reload"): 
 
   // Ordenar numéricamente por el número extraído del trackId, o por el ID mismo si no hay números
   return results.sort((a, b) => {
+    const dateA = dateValue(a.lastUpdatedAt);
+    const dateB = dateValue(b.lastUpdatedAt);
     const matchA = a.trackId.match(/(\d+)/);
     const matchB = b.trackId.match(/(\d+)/);
+    const currentA = a.trackId.toLowerCase() === "l3ague";
+    const currentB = b.trackId.toLowerCase() === "l3ague";
+
+    if (currentA !== currentB) return currentA ? 1 : -1;
     
     if (matchA && matchB) {
       return parseInt(matchA[1]) - parseInt(matchB[1]);
     }
+    if (dateA !== dateB) return dateA - dateB;
     return a.trackId.localeCompare(b.trackId);
   });
+}
+
+function rankedModePriority(rankingType: string, trackId: string, modeCategory: "br" | "reload"): number | null {
+  const combined = `${rankingType} ${trackId}`.toLowerCase();
+  const isReload = /blastberry|reload/.test(combined);
+  const excludedSideModes = /delmar|feral|squareclub|figment|sparks/.test(combined);
+
+  if (modeCategory === "reload") {
+    if (!isReload) return null;
+    if (rankingType === "ranked-blastberry-combined" || rankingType === "ranked-reload-combined") return 0;
+    if (rankingType.includes("blastberry") || rankingType.includes("reload")) return 1;
+    return 2;
+  }
+
+  if (isReload || excludedSideModes) return null;
+  if (rankingType === "ranked-br-combined") return 0;
+  if (rankingType === "ranked-br") return 1;
+  if (rankingType === "ranked-zb-combined") return 2;
+  if (rankingType === "ranked-zb") return 3;
+  if (rankingType.includes("br") || rankingType.includes("zb")) return 4;
+  if (rankingType.startsWith("ranked-")) return 5;
+  return null;
 }
 
 function extractRankedModes(ranksData: unknown): Record<string, unknown>[] {
@@ -939,6 +965,30 @@ async function getSnapshots(accountId: string): Promise<SnapshotRecord[]> {
     score_per_match: toNumber(r.score_per_match) || 0,
     created_at: asText(r.created_at) || new Date(r.created_at as string | number | Date).toISOString(),
   }));
+}
+
+async function getStoredProgress(accountId: string): Promise<ProgressItem[]> {
+  const result = await query(
+    `SELECT
+       metric_name,
+       metric_value,
+       delta,
+       COALESCE(period_label, period_start::text) AS period_start,
+       created_at
+     FROM player_progress
+     WHERE account_id = $1
+     ORDER BY created_at ASC
+     LIMIT 300`,
+    [accountId]
+  );
+
+  return result.rows.map((row: Record<string, unknown>) => ({
+    metric_name: asText(row.metric_name) || "",
+    metric_value: toNumber(row.metric_value) || 0,
+    delta: toNumber(row.delta) || 0,
+    period_start: asText(row.period_start),
+    created_at: asText(row.created_at) || new Date(row.created_at as string | number | Date).toISOString(),
+  })).filter((row: ProgressItem) => row.metric_name !== "");
 }
 
 // ═══════════════════════════════════════════
@@ -1109,7 +1159,21 @@ function predictNextRank(history: RankedSeason[]): {
     .filter((value) => Number.isFinite(value) && value > 0);
 
   if (values.length < 2) {
-    return { predictedRank: null, predictedRankValue: null, confidence: "low", reasoning: "Insuficientes temporadas" };
+    if (history.length === 1) {
+      const onlyRank = history[0];
+      const baseValue = onlyRank.highestRankScore || onlyRank.rankScore || onlyRank.highestRankValue || onlyRank.rankValue;
+      if (baseValue > 0) {
+        const projectedValue = Math.max(1, Math.min(18, baseValue));
+        const predicted = scoreToRankName(projectedValue);
+        return {
+          predictedRank: predicted,
+          predictedRankValue: projectedValue,
+          confidence: "baja",
+          reasoning: `Osirion solo devolvio una temporada ranked (${onlyRank.seasonLabel}); proyeccion conservadora: mantener ${predicted}`,
+        };
+      }
+    }
+    return { predictedRank: null, predictedRankValue: null, confidence: "baja", reasoning: "Insuficientes temporadas" };
   }
 
   const n = values.length;
@@ -1170,6 +1234,7 @@ function buildRichProgress(opts: {
   overallLifetime: ModeStats | null;
   rankedHistoryBR: RankedSeason[];
   rankedHistoryReload: RankedSeason[];
+  storedProgress: ProgressItem[];
   tournamentProfile: TournamentProfile;
   tournamentPlacements: TournamentPlacement[];
   snapshots: SnapshotRecord[];
@@ -1182,6 +1247,10 @@ function buildRichProgress(opts: {
   // Merge mode data: preferir fortnite-api, fallback a osirion
   const effectiveSeasonModes = opts.seasonModes.length > 0 ? opts.seasonModes : opts.osirionSeasonStats;
   const effectiveLifetimeModes = opts.lifetimeModes.length > 0 ? opts.lifetimeModes : opts.osirionLifetimeStats;
+  const storedSeasonMetrics = opts.storedProgress.filter((item) =>
+    ["kd_season", "win_rate_season", "matches_season"].includes(item.metric_name) &&
+    Boolean(item.period_start)
+  );
 
   // ── KD por modo (para bar charts) ──
   for (const m of effectiveSeasonModes) {
@@ -1198,6 +1267,8 @@ function buildRichProgress(opts: {
   for (const m of effectiveLifetimeModes) {
     progress.push({ metric_name: "win_rate_season", metric_value: m.winRate, delta: 0, period_start: `${fmtMode(m.mode)} (Total)`, created_at: new Date().toISOString() });
   }
+
+  mergeStoredProgress(progress, storedSeasonMetrics);
 
   // ── Mode detail table ──
   const allDetails = [
@@ -1219,7 +1290,7 @@ function buildRichProgress(opts: {
     progress.push({
       metric_name: "ranked_history", metric_value: r.highestRankValue, delta: r.rankValue,
       period_start: r.seasonLabel, created_at: new Date().toISOString(),
-      _extra: { currentRank: r.currentRank, highestRank: r.highestRank, progress: r.progress, globalRanking: r.globalRanking, trackId: r.trackId, rankingType: r.rankingType, rankScore: r.rankScore, highestRankScore: r.highestRankScore },
+      _extra: { currentRank: r.currentRank, highestRank: r.highestRank, progress: r.progress, globalRanking: r.globalRanking, trackId: r.trackId, rankingType: r.rankingType, lastUpdatedAt: r.lastUpdatedAt, rankScore: r.rankScore, highestRankScore: r.highestRankScore },
     });
   }
 
@@ -1228,7 +1299,7 @@ function buildRichProgress(opts: {
     progress.push({
       metric_name: "ranked_history_reload", metric_value: r.highestRankValue, delta: r.rankValue,
       period_start: r.seasonLabel, created_at: new Date().toISOString(),
-      _extra: { currentRank: r.currentRank, highestRank: r.highestRank, progress: r.progress, globalRanking: r.globalRanking, trackId: r.trackId, rankingType: r.rankingType, rankScore: r.rankScore, highestRankScore: r.highestRankScore },
+      _extra: { currentRank: r.currentRank, highestRank: r.highestRank, progress: r.progress, globalRanking: r.globalRanking, trackId: r.trackId, rankingType: r.rankingType, lastUpdatedAt: r.lastUpdatedAt, rankScore: r.rankScore, highestRankScore: r.highestRankScore },
     });
   }
 
@@ -1300,6 +1371,16 @@ function buildRichProgress(opts: {
   progress.push({ metric_name: "trend_direction", metric_value: trendMap[opts.prediction.trend] || 0, delta: 0, period_start: null, created_at: new Date().toISOString() });
 
   return progress;
+}
+
+function mergeStoredProgress(progress: ProgressItem[], stored: ProgressItem[]) {
+  const seen = new Set(progress.map((item) => `${item.metric_name}:${item.period_start || ""}`));
+  for (const item of stored) {
+    const key = `${item.metric_name}:${item.period_start || ""}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    progress.push(item);
+  }
 }
 
 function fmtMode(mode: string): string {

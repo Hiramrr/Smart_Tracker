@@ -284,23 +284,45 @@ FROM api_calls
 GROUP BY DATE(created_at), action;
 
 -- Vista: features para modelos de predicción de tienda
-CREATE OR REPLACE VIEW v_cosmetic_prediction_features AS
+DROP VIEW IF EXISTS v_mart_shop_predictions CASCADE;
+DROP VIEW IF EXISTS v_cosmetic_prediction_features CASCADE;
+CREATE VIEW v_cosmetic_prediction_features AS
 WITH ordered AS (
     SELECT
         cosmetic_id,
         shop_date,
-        shop_date - LAG(shop_date) OVER (PARTITION BY cosmetic_id ORDER BY shop_date) AS gap_days
+        shop_date - (ROW_NUMBER() OVER (PARTITION BY cosmetic_id ORDER BY shop_date))::INTEGER AS grp
     FROM cosmetic_shop_appearances
+),
+blocks AS (
+    SELECT
+        cosmetic_id,
+        MIN(shop_date) AS block_start,
+        MAX(shop_date) AS block_end,
+        COUNT(*) AS block_days
+    FROM ordered
+    GROUP BY cosmetic_id, grp
+),
+block_gaps AS (
+    SELECT
+        cosmetic_id,
+        block_start,
+        block_end,
+        block_days,
+        block_start - LAG(block_end) OVER (PARTITION BY cosmetic_id ORDER BY block_start) AS gap_days
+    FROM blocks
 ),
 agg AS (
     SELECT
         cosmetic_id,
         COUNT(*) AS appearances_count,
-        MIN(shop_date) AS first_seen,
-        MAX(shop_date) AS last_seen,
+        MIN(block_start) AS first_seen,
+        MAX(block_end) AS last_seen,
         AVG(gap_days) FILTER (WHERE gap_days IS NOT NULL) AS avg_days_between_appearances,
-        STDDEV(gap_days) FILTER (WHERE gap_days IS NOT NULL) AS stddev_days_between_appearances
-    FROM ordered
+        STDDEV(gap_days) FILTER (WHERE gap_days IS NOT NULL) AS stddev_days_between_appearances,
+        AVG(block_days) AS avg_block_duration,
+        MAX(block_days) AS max_block_duration
+    FROM block_gaps
     GROUP BY cosmetic_id
 )
 SELECT
@@ -321,12 +343,165 @@ SELECT
     CASE WHEN a.last_seen IS NULL THEN NULL ELSE CURRENT_DATE - a.last_seen END AS days_since_last_seen,
     a.avg_days_between_appearances,
     a.stddev_days_between_appearances,
+    a.avg_block_duration,
+    a.max_block_duration,
     CASE
         WHEN a.avg_days_between_appearances IS NULL OR a.last_seen IS NULL THEN NULL
         ELSE GREATEST(0, a.avg_days_between_appearances - (CURRENT_DATE - a.last_seen))
     END AS estimated_days_until_next_shop
 FROM cosmetics c
 LEFT JOIN agg a ON a.cosmetic_id = c.cosmetic_id;
+
+-- ==========================================
+-- Mini Data Mart / Capa Warehouse
+-- Vistas dimensionales para consulta analítica
+-- ==========================================
+
+CREATE OR REPLACE VIEW v_dim_date AS
+SELECT DISTINCT
+    DATE(created_at) AS date_key,
+    EXTRACT(YEAR FROM created_at)::INTEGER AS year,
+    EXTRACT(MONTH FROM created_at)::INTEGER AS month,
+    EXTRACT(DAY FROM created_at)::INTEGER AS day,
+    EXTRACT(DOW FROM created_at)::INTEGER AS day_of_week,
+    TO_CHAR(created_at, 'Dy') AS day_name
+FROM api_calls
+UNION
+SELECT DISTINCT
+    shop_date AS date_key,
+    EXTRACT(YEAR FROM shop_date)::INTEGER AS year,
+    EXTRACT(MONTH FROM shop_date)::INTEGER AS month,
+    EXTRACT(DAY FROM shop_date)::INTEGER AS day,
+    EXTRACT(DOW FROM shop_date)::INTEGER AS day_of_week,
+    TO_CHAR(shop_date, 'Dy') AS day_name
+FROM cosmetic_shop_appearances;
+
+CREATE OR REPLACE VIEW v_dim_api_action AS
+SELECT
+    ROW_NUMBER() OVER (ORDER BY action, api_source) AS action_key,
+    action,
+    COALESCE(api_source, 'unknown') AS api_source,
+    CASE
+        WHEN action LIKE '%cached' THEN 'cache'
+        WHEN action IN ('shop', 'cosmetic-search', 'cosmetic-ingest', 'cosmetic-features') THEN 'cosmetics'
+        WHEN action IN ('tournaments', 'leaderboard', 'player-tournament-placements', 'tournament-player-stats') THEN 'tournaments'
+        WHEN action IN ('lookup', 'stats', 'tracker-stats', 'fortnite-api-stats', 'ranked-current') THEN 'player'
+        ELSE 'other'
+    END AS business_domain
+FROM (
+    SELECT DISTINCT action, api_source
+    FROM api_calls
+) actions;
+
+CREATE OR REPLACE VIEW v_dim_player AS
+SELECT
+    account_id AS player_key,
+    MAX(display_name) AS display_name,
+    MAX(platform) AS platform,
+    MIN(captured_at) AS first_seen_at,
+    MAX(captured_at) AS last_seen_at,
+    COUNT(*) AS snapshot_count
+FROM player_snapshots
+WHERE account_id IS NOT NULL
+GROUP BY account_id;
+
+CREATE OR REPLACE VIEW v_dim_cosmetic AS
+SELECT
+    cosmetic_id AS cosmetic_key,
+    name,
+    type,
+    rarity,
+    series,
+    set_name,
+    introduced_chapter,
+    introduced_season,
+    image_icon,
+    image_featured,
+    added_at,
+    updated_at
+FROM cosmetics;
+
+CREATE OR REPLACE VIEW v_fact_api_calls AS
+SELECT
+    id AS api_call_key,
+    DATE(created_at) AS date_key,
+    action,
+    COALESCE(api_source, 'unknown') AS api_source,
+    response_status,
+    response_size,
+    duration_ms,
+    CASE WHEN response_status >= 400 THEN 1 ELSE 0 END AS error_count,
+    1 AS call_count,
+    created_at
+FROM api_calls;
+
+CREATE OR REPLACE VIEW v_fact_shop_appearances AS
+SELECT
+    a.id AS shop_appearance_key,
+    a.shop_date AS date_key,
+    a.cosmetic_id AS cosmetic_key,
+    a.source,
+    a.regular_price,
+    a.final_price,
+    CASE
+        WHEN a.regular_price IS NOT NULL AND a.final_price IS NOT NULL
+        THEN a.regular_price - a.final_price
+        ELSE NULL
+    END AS discount_amount,
+    1 AS appearance_count,
+    a.ingested_at
+FROM cosmetic_shop_appearances a;
+
+CREATE OR REPLACE VIEW v_mart_api_reliability_daily AS
+SELECT
+    date_key,
+    api_source,
+    action,
+    SUM(call_count) AS total_calls,
+    ROUND(AVG(duration_ms)::numeric, 2) AS avg_duration_ms,
+    MAX(duration_ms) AS max_duration_ms,
+    SUM(error_count) AS errors,
+    ROUND((SUM(error_count)::numeric / NULLIF(SUM(call_count), 0)) * 100, 2) AS error_rate_pct
+FROM v_fact_api_calls
+GROUP BY date_key, api_source, action;
+
+DROP VIEW IF EXISTS v_mart_shop_predictions CASCADE;
+CREATE VIEW v_mart_shop_predictions AS
+WITH latest_predictions AS (
+    SELECT DISTINCT ON (p.cosmetic_id)
+        p.cosmetic_id,
+        p.predicted_days_until_next,
+        p.predicted_next_shop_date,
+        p.confidence_score,
+        p.model_name,
+        p.created_at
+    FROM cosmetic_predictions p
+    ORDER BY p.cosmetic_id, p.created_at DESC
+)
+SELECT
+    c.cosmetic_key,
+    c.name,
+    c.type,
+    c.rarity,
+    c.series,
+    c.image_icon,
+    c.image_featured,
+    f.appearances_count,
+    f.last_seen,
+    f.days_since_last_seen,
+    f.avg_days_between_appearances,
+    f.stddev_days_between_appearances,
+    f.avg_block_duration,
+    f.max_block_duration,
+    f.estimated_days_until_next_shop,
+    lp.predicted_days_until_next,
+    lp.predicted_next_shop_date,
+    lp.confidence_score,
+    lp.model_name,
+    lp.created_at AS prediction_created_at
+FROM v_dim_cosmetic c
+LEFT JOIN v_cosmetic_prediction_features f ON f.cosmetic_id = c.cosmetic_key
+LEFT JOIN latest_predictions lp ON lp.cosmetic_id = c.cosmetic_key;
 -- ==========================================
 -- Patrón Outbox
 -- ==========================================
@@ -390,6 +565,7 @@ CREATE TABLE IF NOT EXISTS player_progress (
     metric_name VARCHAR(100) NOT NULL, -- 'kd', 'win_rate', 'kills_per_match'
     metric_value NUMERIC NOT NULL,
     delta NUMERIC, -- cambio respecto a la medición anterior
+    period_label TEXT,
     period_start TIMESTAMP WITH TIME ZONE,
     period_end TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
@@ -397,6 +573,18 @@ CREATE TABLE IF NOT EXISTS player_progress (
 
 CREATE INDEX IF NOT EXISTS idx_player_progress_account ON player_progress(account_id);
 CREATE INDEX IF NOT EXISTS idx_player_progress_metric ON player_progress(metric_name);
+
+CREATE OR REPLACE VIEW v_fact_player_progress AS
+SELECT
+    id AS progress_key,
+    account_id AS player_key,
+    DATE(created_at) AS date_key,
+    metric_name,
+    metric_value,
+    delta,
+    period_label,
+    created_at
+FROM player_progress;
 
 -- ==========================================
 -- Tabla: player_analysis_snapshots

@@ -183,18 +183,18 @@ def process_past_seasons(conn, account_id, past_seasons):
         
         # Guardar puntos históricos en player_progress con deltas reales
         cur.execute("""
-            INSERT INTO player_progress (account_id, metric_name, metric_value, delta, period_start)
+            INSERT INTO player_progress (account_id, metric_name, metric_value, delta, period_label)
             VALUES (%s, %s, %s, %s, %s)
         """, (account_id, 'kd_season', kd, round(delta_kd, 4), season_name))
         
         cur.execute("""
-            INSERT INTO player_progress (account_id, metric_name, metric_value, delta, period_start)
+            INSERT INTO player_progress (account_id, metric_name, metric_value, delta, period_label)
             VALUES (%s, %s, %s, %s, %s)
         """, (account_id, 'win_rate_season', win_rate, round(delta_wr, 4), season_name))
         
         # Guardar matches por temporada también
         cur.execute("""
-            INSERT INTO player_progress (account_id, metric_name, metric_value, delta, period_start)
+            INSERT INTO player_progress (account_id, metric_name, metric_value, delta, period_label)
             VALUES (%s, %s, %s, %s, %s)
         """, (account_id, 'matches_season', matches, 0, season_name))
         
@@ -400,7 +400,7 @@ def process_tournament_placements(conn, account_id, event, data):
         if rank is not None:
             numeric_placements.append(rank)
             cur.execute("""
-                INSERT INTO player_progress (account_id, metric_name, metric_value, delta, period_start)
+                INSERT INTO player_progress (account_id, metric_name, metric_value, delta, period_label)
                 VALUES (%s, %s, %s, %s, %s)
             """, (account_id, 'tournament_placement', rank, 0, event_window_id))
         if points is not None:

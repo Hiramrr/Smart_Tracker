@@ -2,13 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BarChart3, GitCompareArrows, ShoppingBag, Trophy, Users } from "lucide-react";
+import { BarChart3, Database, GitCompareArrows, ShoppingBag, Trophy, Users } from "lucide-react";
 
 const NAV_ITEMS = [
   { href: "/dashboard/player", label: "Personas", icon: Users, match: (pathname: string) => pathname.startsWith("/dashboard/player") },
   { href: "/dashboard/compare", label: "Comparacion", icon: GitCompareArrows, match: (pathname: string) => pathname.startsWith("/dashboard/compare") },
   { href: "/dashboard/tournaments", label: "Torneos", icon: Trophy, match: (pathname: string) => pathname.startsWith("/dashboard/tournaments") },
   { href: "/dashboard/shop", label: "Tienda", icon: ShoppingBag, match: (pathname: string) => pathname.startsWith("/dashboard/shop") },
+  { href: "/dashboard/warehouse", label: "Warehouse", icon: Database, match: (pathname: string) => pathname.startsWith("/dashboard/warehouse") },
 ];
 
 export function DashboardTopNav() {

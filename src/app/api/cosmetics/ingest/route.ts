@@ -2,17 +2,20 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   fetchCurrentShop,
   ingestCatalog,
+  ingestShopHistoryRange,
   ingestSingleCosmetic,
   upsertShopSnapshot,
 } from "@/lib/fortnite-cosmetics";
 import { ensureDatabaseInitialized } from "@/lib/init";
 
 type IngestBody = {
-  mode?: "single" | "catalog" | "shop";
+  mode?: "single" | "catalog" | "shop" | "shop-history";
   id?: string;
   name?: string;
   language?: string;
   limit?: number;
+  from?: string;
+  to?: string;
 };
 
 function parsePositiveInteger(value: string | null): number | undefined {
@@ -53,8 +56,21 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ success: true, summary });
     }
 
+    if (mode === "shop-history") {
+      const from = searchParams.get("from") || undefined;
+      const to = searchParams.get("to") || undefined;
+      if (!from || !to) {
+        return NextResponse.json(
+          { success: false, error: "from y to son requeridos para mode=shop-history" },
+          { status: 400 }
+        );
+      }
+      const summary = await ingestShopHistoryRange(from, to, language);
+      return NextResponse.json({ success: true, summary });
+    }
+
     return NextResponse.json(
-      { success: false, error: "mode debe ser single, catalog o shop" },
+      { success: false, error: "mode debe ser single, catalog, shop o shop-history" },
       { status: 400 }
     );
   } catch (error) {
@@ -84,6 +100,17 @@ export async function POST(req: NextRequest) {
 
     if (mode === "catalog") {
       const summary = await ingestCatalog(language, body.limit);
+      return NextResponse.json({ success: true, summary });
+    }
+
+    if (mode === "shop-history") {
+      if (!body.from || !body.to) {
+        return NextResponse.json(
+          { success: false, error: "from y to son requeridos para mode=shop-history" },
+          { status: 400 }
+        );
+      }
+      const summary = await ingestShopHistoryRange(body.from, body.to, language);
       return NextResponse.json({ success: true, summary });
     }
 

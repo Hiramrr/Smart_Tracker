@@ -114,20 +114,36 @@ async function fetchFortniteApi(path: string, init?: RequestInit): Promise<JsonR
 }
 
 export async function fetchCosmeticBySearch(search: { id?: string; name?: string; language?: string }) {
-  const params = new URLSearchParams({
-    responseFlags: String(INCLUDE_ALL_COSMETIC_FLAGS),
-    language: search.language || "es-419",
-  });
-  if (search.id) params.set("id", search.id);
-  if (search.name) {
-    params.set("name", search.name);
-    params.set("searchLanguage", search.language || "es-419");
-  }
-
-  const payload = await fetchFortniteApi(`/cosmetics/br/search?${params.toString()}`);
+  const payload = await tryFetchCosmetic(search);
   const cosmetic = normalizeCosmetic(asRecord(payload.data));
   if (!cosmetic) throw new Error("Cosmetico no encontrado");
   return cosmetic;
+}
+
+async function tryFetchCosmetic(search: { id?: string; name?: string; language?: string }): Promise<JsonRecord> {
+  const languages = [search.language || "es-419", "en"];
+  const lastError: Error[] = [];
+
+  for (const lang of languages) {
+    const params = new URLSearchParams({
+      responseFlags: String(INCLUDE_ALL_COSMETIC_FLAGS),
+      language: lang,
+    });
+    if (search.id) params.set("id", search.id);
+    if (search.name) {
+      params.set("name", search.name.trim());
+      params.set("searchLanguage", lang);
+      params.set("matchMethod", "contains");
+    }
+
+    try {
+      return await fetchFortniteApi(`/cosmetics/br/search?${params.toString()}`);
+    } catch (error) {
+      lastError.push(error instanceof Error ? error : new Error(String(error)));
+    }
+  }
+
+  throw lastError[0] || new Error("Cosmetico no encontrado en ningun idioma");
 }
 
 export async function fetchCosmeticCatalog(language = "es-419") {
@@ -142,6 +158,49 @@ export async function fetchCosmeticCatalog(language = "es-419") {
 export async function fetchCurrentShop(language = "es-419") {
   const params = new URLSearchParams({ language });
   return fetchFortniteApi(`/shop?${params.toString()}`);
+}
+
+export async function fetchShopByDate(date: string, language = "es-419") {
+  const params = new URLSearchParams({ language, date });
+  return fetchFortniteApi(`/shop?${params.toString()}`);
+}
+
+export async function ingestShopHistoryRange(
+  fromDate: string,
+  toDate: string,
+  language = "es-419"
+) {
+  const from = new Date(fromDate);
+  const to = new Date(toDate);
+  let cosmeticsUpserted = 0;
+  let appearancesUpserted = 0;
+  let shopEntriesUpserted = 0;
+  let daysProcessed = 0;
+
+  for (let d = new Date(from); d <= to; d.setDate(d.getDate() + 1)) {
+    const dateStr = d.toISOString().slice(0, 10);
+    try {
+      const shop = await fetchShopByDate(dateStr, language);
+      const summary = await upsertShopSnapshot(shop);
+      cosmeticsUpserted += summary.cosmeticsUpserted;
+      appearancesUpserted += summary.appearancesUpserted;
+      shopEntriesUpserted += summary.shopEntriesUpserted;
+    } catch (err) {
+      console.warn(`[ShopHistory] Error ingiriendo ${dateStr}:`, err);
+    }
+    daysProcessed += 1;
+  }
+
+  return {
+    source: "fortnite-api",
+    mode: "shop-history" as const,
+    fromDate,
+    toDate,
+    daysProcessed,
+    cosmeticsUpserted,
+    appearancesUpserted,
+    shopEntriesUpserted,
+  };
 }
 
 export async function upsertCosmetic(cosmetic: CosmeticSearchResult): Promise<number> {

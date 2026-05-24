@@ -184,6 +184,25 @@ services:
     networks:
       - miyu-network
 
+  # ==========================================
+  # Job batch ML bajo demanda (predicciones tienda)
+  # Ejecutar con: docker-compose run --rm cosmetic-predictor
+  # ==========================================
+  cosmetic-predictor:
+    build:
+      context: ./etl
+    container_name: miyu-cosmetic-predictor
+    profiles:
+      - batch
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-miyu}:${POSTGRES_PASSWORD:-miyu_secret}@postgres:5432/${POSTGRES_DB:-miyu_datalake}
+    command: ["python", "cosmetic_predictions.py"]
+    networks:
+      - miyu-network
+
 volumes:
   postgres_data:
     driver: local
