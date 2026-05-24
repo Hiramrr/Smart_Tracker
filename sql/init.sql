@@ -29,7 +29,17 @@ CREATE TABLE IF NOT EXISTS api_calls (
         'lookup', 'stats', 'tracker-stats', 'fortnite-api-stats',
         'ranked-current', 'tournaments', 'leaderboard', 'shop',
         'cosmetic-search', 'cosmetic-ingest', 'cosmetic-features',
-        'player-tournament-placements', 'tournament-player-stats'
+        'player-tournament-placements', 'tournament-player-stats',
+        'lol-account', 'lol-profile', 'lol-ranked', 'lol-mastery',
+        'lol-matches', 'lol-match', 'lol-overview', 'lol-static-champions',
+        'lookup-cached', 'stats-cached', 'tracker-stats-cached',
+        'fortnite-api-stats-cached', 'ranked-current-cached',
+        'tournaments-cached', 'leaderboard-cached', 'shop-cached',
+        'cosmetic-search-cached', 'cosmetic-ingest-cached', 'cosmetic-features-cached',
+        'player-tournament-placements-cached', 'tournament-player-stats-cached',
+        'lol-account-cached', 'lol-profile-cached', 'lol-ranked-cached',
+        'lol-mastery-cached', 'lol-matches-cached', 'lol-match-cached',
+        'lol-overview-cached', 'lol-static-champions-cached'
     ))
 );
 
@@ -256,6 +266,123 @@ CREATE INDEX IF NOT EXISTS idx_player_tournament_placements_event ON player_tour
 CREATE INDEX IF NOT EXISTS idx_player_tournament_placements_window ON player_tournament_placements(event_window_id);
 
 -- ==========================================
+-- Tabla: lol_player_snapshots
+-- Snapshots de League of Legends por Riot ID / PUUID
+-- ==========================================
+CREATE TABLE IF NOT EXISTS lol_player_snapshots (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    puuid VARCHAR(255) NOT NULL,
+    game_name VARCHAR(255),
+    tag_line VARCHAR(32),
+    platform VARCHAR(20),
+    regional_route VARCHAR(20),
+    summoner_id VARCHAR(255),
+    summoner_level INTEGER,
+    profile_icon_id INTEGER,
+    ranked_data JSONB DEFAULT '[]'::jsonb,
+    mastery_data JSONB DEFAULT '[]'::jsonb,
+    analysis JSONB DEFAULT '{}'::jsonb,
+    raw_json JSONB,
+    captured_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_lol_player_snapshots_puuid ON lol_player_snapshots(puuid);
+CREATE INDEX IF NOT EXISTS idx_lol_player_snapshots_riot_id ON lol_player_snapshots(game_name, tag_line);
+CREATE INDEX IF NOT EXISTS idx_lol_player_snapshots_captured ON lol_player_snapshots(captured_at);
+
+-- ==========================================
+-- Tabla: lol_match_snapshots
+-- Partidas recientes guardadas desde Match-V5
+-- ==========================================
+CREATE TABLE IF NOT EXISTS lol_match_snapshots (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    match_id VARCHAR(255) NOT NULL,
+    puuid VARCHAR(255) NOT NULL,
+    game_creation TIMESTAMP WITH TIME ZONE,
+    game_duration INTEGER,
+    queue_id INTEGER,
+    raw_json JSONB NOT NULL,
+    captured_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    CONSTRAINT unique_lol_match_player UNIQUE (match_id, puuid)
+);
+
+CREATE INDEX IF NOT EXISTS idx_lol_match_snapshots_match ON lol_match_snapshots(match_id);
+CREATE INDEX IF NOT EXISTS idx_lol_match_snapshots_puuid ON lol_match_snapshots(puuid);
+CREATE INDEX IF NOT EXISTS idx_lol_match_snapshots_created ON lol_match_snapshots(game_creation);
+
+-- ==========================================
+-- Tabla: lol_player_classifications
+-- Salidas batch/ML para clasificacion de jugadores de LoL
+-- ==========================================
+CREATE TABLE IF NOT EXISTS lol_player_classifications (
+    id SERIAL PRIMARY KEY,
+    puuid VARCHAR(255) NOT NULL,
+    game_name VARCHAR(255),
+    tag_line VARCHAR(32),
+    platform VARCHAR(20),
+    matches_analyzed INTEGER NOT NULL DEFAULT 0,
+    skill_label VARCHAR(100) NOT NULL,
+    skill_value NUMERIC NOT NULL,
+    playstyle_label VARCHAR(100),
+    main_role VARCHAR(50),
+    main_champion VARCHAR(100),
+    win_rate NUMERIC,
+    avg_kda NUMERIC,
+    avg_kills NUMERIC,
+    avg_deaths NUMERIC,
+    avg_assists NUMERIC,
+    avg_cs_per_min NUMERIC,
+    avg_gold_per_min NUMERIC,
+    ranked_score NUMERIC,
+    ranked_tier VARCHAR(100),
+    predicted_rank VARCHAR(100),
+    predicted_rank_score NUMERIC,
+    rank_prediction_confidence VARCHAR(50),
+    rank_prediction_reasoning TEXT,
+    focus_areas JSONB DEFAULT '[]'::jsonb,
+    champion_recommendations JSONB DEFAULT '[]'::jsonb,
+    next_pick JSONB DEFAULT '{}'::jsonb,
+    beginner_pick JSONB DEFAULT '{}'::jsonb,
+    cluster_id INTEGER,
+    model_name VARCHAR(120) NOT NULL,
+    features JSONB,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_lol_classifications_puuid ON lol_player_classifications(puuid);
+CREATE INDEX IF NOT EXISTS idx_lol_classifications_created ON lol_player_classifications(created_at);
+
+CREATE OR REPLACE VIEW v_lol_match_features AS
+SELECT
+    m.match_id,
+    m.puuid,
+    m.game_creation,
+    COALESCE((m.raw_json->'info'->>'gameDuration')::NUMERIC, m.game_duration) AS game_duration_seconds,
+    COALESCE((m.raw_json->'info'->>'queueId')::INTEGER, m.queue_id) AS queue_id,
+    participant.value->>'championName' AS champion_name,
+    (participant.value->>'championId')::INTEGER AS champion_id,
+    participant.value->>'teamPosition' AS team_position,
+    participant.value->>'individualPosition' AS individual_position,
+    COALESCE((participant.value->>'win')::BOOLEAN, FALSE) AS win,
+    COALESCE((participant.value->>'kills')::NUMERIC, 0) AS kills,
+    COALESCE((participant.value->>'deaths')::NUMERIC, 0) AS deaths,
+    COALESCE((participant.value->>'assists')::NUMERIC, 0) AS assists,
+    COALESCE((participant.value->>'goldEarned')::NUMERIC, 0) AS gold_earned,
+    COALESCE((participant.value->>'totalMinionsKilled')::NUMERIC, 0)
+      + COALESCE((participant.value->>'neutralMinionsKilled')::NUMERIC, 0) AS cs,
+    participant.value AS participant_json,
+    m.captured_at
+FROM lol_match_snapshots m
+CROSS JOIN LATERAL jsonb_array_elements(COALESCE(m.raw_json->'info'->'participants', '[]'::jsonb)) AS participant(value)
+WHERE participant.value->>'puuid' = m.puuid;
+
+CREATE OR REPLACE VIEW v_mart_lol_player_classification AS
+SELECT DISTINCT ON (c.puuid)
+    c.*
+FROM lol_player_classifications c
+ORDER BY c.puuid, c.created_at DESC;
+
+-- ==========================================
 -- Vistas analíticas
 -- ==========================================
 
@@ -384,6 +511,7 @@ SELECT
     CASE
         WHEN action LIKE '%cached' THEN 'cache'
         WHEN action IN ('shop', 'cosmetic-search', 'cosmetic-ingest', 'cosmetic-features') THEN 'cosmetics'
+        WHEN action LIKE 'lol-%' THEN 'league-of-legends'
         WHEN action IN ('tournaments', 'leaderboard', 'player-tournament-placements', 'tournament-player-stats') THEN 'tournaments'
         WHEN action IN ('lookup', 'stats', 'tracker-stats', 'fortnite-api-stats', 'ranked-current') THEN 'player'
         ELSE 'other'

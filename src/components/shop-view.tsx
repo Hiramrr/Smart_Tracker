@@ -604,7 +604,7 @@ function PredictionGrid({
             onClick={onSearchApi}
             className="mt-4 rounded-xl bg-miyu-btn px-4 py-2 text-sm font-semibold text-miyu-text transition-colors hover:bg-miyu-btn-hover"
           >
-            Buscar "{searchQuery.trim()}" en API de Fortnite
+            Buscar &quot;{searchQuery.trim()}&quot; en API de Fortnite
           </button>
         )}
       </div>
@@ -757,6 +757,7 @@ function SearchResultCard({
     <div className="mb-8 overflow-hidden rounded-2xl border border-miyu-border bg-white shadow-[0_8px_24px_rgba(30,57,50,0.06)]">
       <div className="relative aspect-[4/3] overflow-hidden bg-miyu-accent-light">
         {image ? (
+          // eslint-disable-next-line @next/next/no-img-element
           <img
             src={image}
             alt={cosmetic.name}

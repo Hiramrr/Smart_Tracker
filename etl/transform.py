@@ -6,6 +6,7 @@ import pandas as pd
 import numpy as np
 from kafka import KafkaConsumer
 from sklearn.cluster import KMeans
+from sklearn.preprocessing import StandardScaler
 
 # ==========================================
 # Configuración
@@ -475,6 +476,199 @@ def classify_competitive_profile(score, best, top_25, top_100, top_500):
 
 
 # ==========================================
+# Análisis de Replays de Fortnite
+# ==========================================
+def load_fortnite_replays(conn, player_id, display_name=None):
+    query = """
+        SELECT
+            replay_id, file_name, playlist, placement,
+            eliminations, deaths, damage_to_players, damage_from_players,
+            accuracy_percent, assists, revives,
+            materials_gathered, materials_used, total_traveled,
+            duration_seconds, total_players, created_at
+        FROM fortnite_replays
+        WHERE player_id = %s
+        ORDER BY created_at ASC
+    """
+    df = pd.read_sql_query(query, conn, params=(player_id,))
+    if df.empty and display_name:
+        df = pd.read_sql_query(
+            """
+            SELECT
+                replay_id, file_name, playlist, placement,
+                eliminations, deaths, damage_to_players, damage_from_players,
+                accuracy_percent, assists, revives,
+                materials_gathered, materials_used, total_traveled,
+                duration_seconds, total_players, created_at
+            FROM fortnite_replays
+            WHERE display_name = %s
+            ORDER BY created_at ASC
+            """,
+            conn, params=(display_name,)
+        )
+    return df
+
+
+def compute_replay_features(df):
+    if df.empty:
+        return None
+    features_df = df.copy()
+    numeric_cols = ['eliminations', 'deaths', 'damage_to_players', 'damage_from_players',
+                    'accuracy_percent', 'assists', 'revives', 'materials_gathered',
+                    'materials_used', 'total_traveled', 'duration_seconds']
+    for col in numeric_cols:
+        features_df[col] = pd.to_numeric(features_df[col], errors='coerce').fillna(0)
+
+    features_df['kd'] = features_df.apply(lambda r: r['eliminations'] / max(r['deaths'], 1), axis=1)
+    features_df['damage_ratio'] = features_df.apply(lambda r: r['damage_to_players'] / max(r['damage_from_players'], 1), axis=1)
+    features_df['placement_inv'] = features_df['placement'].apply(lambda p: 1 / max(p, 1) if pd.notna(p) else 0)
+    return features_df
+
+
+def classify_fortnite_playstyle(features_df):
+    if features_df is None or len(features_df) < 3:
+        return "Insuficientes datos", 0
+
+    feature_cols = ['kd', 'damage_to_players', 'damage_ratio', 'placement_inv',
+                    'materials_gathered', 'materials_used', 'total_traveled']
+    X = features_df[feature_cols].values
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
+
+    n_clusters = min(3, len(features_df))
+    kmeans = KMeans(n_clusters=n_clusters, n_init=10, random_state=42)
+    clusters = kmeans.fit_predict(X_scaled)
+
+    labels = []
+    for c in range(n_clusters):
+        centroid = kmeans.cluster_centers_[c]
+        kd_score = centroid[feature_cols.index('kd')]
+        mat_score = centroid[feature_cols.index('materials_gathered')]
+        dmg_score = centroid[feature_cols.index('damage_to_players')]
+
+        if kd_score > 0.5 and dmg_score > 0.5:
+            label = "Agresivo"
+        elif mat_score > 0.5:
+            label = "Constructor"
+        else:
+            label = "Estrategico"
+        labels.append(label)
+
+    unique, counts = np.unique(clusters, return_counts=True)
+    dominant_cluster = unique[np.argmax(counts)]
+    dominant_label = labels[dominant_cluster]
+    return dominant_label, int(dominant_cluster)
+
+
+def analyze_fortnite_trends(features_df):
+    if features_df is None or len(features_df) < 2:
+        return {}
+
+    trends = {}
+    metrics = ['kd', 'placement', 'damage_to_players', 'accuracy_percent']
+    x = np.arange(len(features_df))
+
+    for metric in metrics:
+        values = features_df[metric].values
+        valid_mask = ~np.isnan(values)
+        if valid_mask.sum() < 2:
+            continue
+        coeffs = np.polyfit(x[valid_mask], values[valid_mask], 1)
+        slope = coeffs[0]
+        trends[f'{metric}_trend_slope'] = round(float(slope), 6)
+
+        if metric == 'placement':
+            if slope < -0.1:
+                trends[f'{metric}_trend'] = 'mejorando'
+            elif slope > 0.1:
+                trends[f'{metric}_trend'] = 'empeorando'
+            else:
+                trends[f'{metric}_trend'] = 'estable'
+        else:
+            if slope > 0.01:
+                trends[f'{metric}_trend'] = 'mejorando'
+            elif slope < -0.01:
+                trends[f'{metric}_trend'] = 'empeorando'
+            else:
+                trends[f'{metric}_trend'] = 'estable'
+
+    if 'kd_trend_slope' in trends and len(features_df) >= 2:
+        last_kd = features_df['kd'].iloc[-1]
+        predicted_kd = last_kd + trends['kd_trend_slope']
+        trends['predicted_kd_next'] = round(max(0, predicted_kd), 4)
+
+    return trends
+
+
+def save_fortnite_replay_metrics(conn, player_id, display_name, features_df, playstyle_label, playstyle_value, trends):
+    cur = conn.cursor()
+    total_matches = len(features_df)
+    avg_kd = round(features_df['kd'].mean(), 4) if not features_df['kd'].isna().all() else 0
+    avg_placement = round(features_df['placement'].mean(), 4) if not features_df['placement'].isna().all() else 0
+    avg_damage = round(features_df['damage_to_players'].mean(), 4) if not features_df['damage_to_players'].isna().all() else 0
+    avg_accuracy = round(features_df['accuracy_percent'].mean(), 4) if not features_df['accuracy_percent'].isna().all() else 0
+    wins = int((features_df['placement'] == 1).sum()) if not features_df['placement'].isna().all() else 0
+
+    metrics = [
+        ('fortnite_replay_matches', total_matches),
+        ('fortnite_replay_avg_kd', avg_kd),
+        ('fortnite_replay_avg_placement', avg_placement),
+        ('fortnite_replay_avg_damage', avg_damage),
+        ('fortnite_replay_avg_accuracy', avg_accuracy),
+        ('fortnite_replay_wins', wins),
+        ('fortnite_replay_playstyle', playstyle_value),
+        ('fortnite_replay_playstyle_label', playstyle_label),
+    ]
+
+    for metric_name, metric_value in metrics:
+        if isinstance(metric_value, str):
+            continue
+        cur.execute("""
+            INSERT INTO player_progress (account_id, metric_name, metric_value, delta)
+            VALUES (%s, %s, %s, %s)
+        """, (player_id, metric_name, float(metric_value), 0))
+
+    for key, value in trends.items():
+        if isinstance(value, (int, float)):
+            cur.execute("""
+                INSERT INTO player_progress (account_id, metric_name, metric_value, delta)
+                VALUES (%s, %s, %s, %s)
+            """, (player_id, f'fortnite_replay_{key}', float(value), 0))
+
+    win_rate = round((wins / max(total_matches, 1)) * 100, 4)
+    kills = int(features_df['eliminations'].sum()) if not features_df['eliminations'].isna().all() else 0
+    deaths = int(features_df['deaths'].sum()) if not features_df['deaths'].isna().all() else 0
+
+    cur.execute("""
+        INSERT INTO player_analysis_snapshots (
+            account_id, kd, win_rate, matches, kills, score_per_match
+        ) VALUES (%s, %s, %s, %s, %s, %s)
+    """, (player_id, avg_kd, win_rate, total_matches, kills, avg_damage))
+
+    conn.commit()
+    cur.close()
+    print(f"[ETL-FN] Guardadas métricas para {display_name or player_id}: {total_matches} matches, estilo={playstyle_label}")
+
+
+def process_fortnite_replays(conn, data):
+    player_id = data.get('player', {}).get('playerId')
+    display_name = data.get('player', {}).get('displayName')
+
+    if not player_id and not display_name:
+        return
+
+    features_df = compute_replay_features(load_fortnite_replays(conn, player_id, display_name))
+    if features_df is None or features_df.empty:
+        print(f"[ETL-FN] No hay replays para procesar: {display_name or player_id}")
+        return
+
+    playstyle_label, playstyle_value = classify_fortnite_playstyle(features_df)
+    trends = analyze_fortnite_trends(features_df)
+    save_fortnite_replay_metrics(conn, player_id or display_name, display_name, features_df,
+                                  playstyle_label, playstyle_value, trends)
+
+
+# ==========================================
 # Lógica de Transformación Principal
 # ==========================================
 def transform_and_save(conn, event):
@@ -496,6 +690,10 @@ def transform_and_save(conn, event):
 
     if action in ('player-tournament-placements', 'tournament-player-stats'):
         process_tournament_placements(conn, account_id, event, data)
+        return
+
+    if action == 'fortnite-replay-parse':
+        process_fortnite_replays(conn, data)
         return
 
     # 1. Procesar temporadas pasadas (análisis completo + KMeans + predicción)

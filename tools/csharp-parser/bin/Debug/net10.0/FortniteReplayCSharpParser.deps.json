@@ -1,0 +1,130 @@
+{
+  "runtimeTarget": {
+    "name": ".NETCoreApp,Version=v10.0",
+    "signature": ""
+  },
+  "compilationOptions": {},
+  "targets": {
+    ".NETCoreApp,Version=v10.0": {
+      "FortniteReplayCSharpParser/1.0.0": {
+        "dependencies": {
+          "FortniteReplayReader": "3.0.1"
+        },
+        "runtime": {
+          "FortniteReplayCSharpParser.dll": {}
+        }
+      },
+      "FortniteReplayReader/3.0.1": {
+        "dependencies": {
+          "Microsoft.Extensions.Logging.Abstractions": "10.0.0",
+          "Unreal.Core": "3.0.1",
+          "Unreal.Encryption": "3.0.1"
+        },
+        "runtime": {
+          "lib/net10.0/FortniteReplayReader.dll": {
+            "assemblyVersion": "1.0.0.0",
+            "fileVersion": "1.0.0.0"
+          }
+        }
+      },
+      "Microsoft.Extensions.DependencyInjection.Abstractions/10.0.0": {
+        "runtime": {
+          "lib/net10.0/Microsoft.Extensions.DependencyInjection.Abstractions.dll": {
+            "assemblyVersion": "10.0.0.0",
+            "fileVersion": "10.0.25.52411"
+          }
+        }
+      },
+      "Microsoft.Extensions.Logging.Abstractions/10.0.0": {
+        "dependencies": {
+          "Microsoft.Extensions.DependencyInjection.Abstractions": "10.0.0"
+        },
+        "runtime": {
+          "lib/net10.0/Microsoft.Extensions.Logging.Abstractions.dll": {
+            "assemblyVersion": "10.0.0.0",
+            "fileVersion": "10.0.25.52411"
+          }
+        }
+      },
+      "OozSharp/3.0.1": {
+        "runtime": {
+          "lib/net10.0/OozSharp.dll": {
+            "assemblyVersion": "1.0.0.0",
+            "fileVersion": "1.0.0.0"
+          }
+        }
+      },
+      "Unreal.Core/3.0.1": {
+        "dependencies": {
+          "Microsoft.Extensions.Logging.Abstractions": "10.0.0"
+        },
+        "runtime": {
+          "lib/net10.0/Unreal.Core.dll": {
+            "assemblyVersion": "1.0.0.0",
+            "fileVersion": "1.0.0.0"
+          }
+        }
+      },
+      "Unreal.Encryption/3.0.1": {
+        "dependencies": {
+          "OozSharp": "3.0.1"
+        },
+        "runtime": {
+          "lib/net10.0/Unreal.Encryption.dll": {
+            "assemblyVersion": "1.0.0.0",
+            "fileVersion": "1.0.0.0"
+          }
+        }
+      }
+    }
+  },
+  "libraries": {
+    "FortniteReplayCSharpParser/1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "FortniteReplayReader/3.0.1": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-2TywjxWETHZaw/UXGRWGV1yOAzIbJLobkRlYS66ijRnqhZ19CXq8++HuV5N+QlnnN4l7LZH3E6W5pKecTAkPtA==",
+      "path": "fortnitereplayreader/3.0.1",
+      "hashPath": "fortnitereplayreader.3.0.1.nupkg.sha512"
+    },
+    "Microsoft.Extensions.DependencyInjection.Abstractions/10.0.0": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-L3AdmZ1WOK4XXT5YFPEwyt0ep6l8lGIPs7F5OOBZc77Zqeo01Of7XXICy47628sdVl0v/owxYJTe86DTgFwKCA==",
+      "path": "microsoft.extensions.dependencyinjection.abstractions/10.0.0",
+      "hashPath": "microsoft.extensions.dependencyinjection.abstractions.10.0.0.nupkg.sha512"
+    },
+    "Microsoft.Extensions.Logging.Abstractions/10.0.0": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-FU/IfjDfwaMuKr414SSQNTIti/69bHEMb+QKrskRb26oVqpx3lNFXMjs/RC9ZUuhBhcwDM2BwOgoMw+PZ+beqQ==",
+      "path": "microsoft.extensions.logging.abstractions/10.0.0",
+      "hashPath": "microsoft.extensions.logging.abstractions.10.0.0.nupkg.sha512"
+    },
+    "OozSharp/3.0.1": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-YN01bHFU/He2fyfUZOKju7L7VPHzCueiLhMQntuij/sBHqpqnb8ZDTnOlceiX+g21tmfREIs5tsIFLDLj+XKWw==",
+      "path": "oozsharp/3.0.1",
+      "hashPath": "oozsharp.3.0.1.nupkg.sha512"
+    },
+    "Unreal.Core/3.0.1": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-pFF3dn5rxzS+7V6cqTP2RfqGpmF+7jUh7CGavtUrVJlyKfZ4BWyPsQ7CAl2dImdCJ1mLzsobCrqhJR0YUyUbpg==",
+      "path": "unreal.core/3.0.1",
+      "hashPath": "unreal.core.3.0.1.nupkg.sha512"
+    },
+    "Unreal.Encryption/3.0.1": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-7gPT9WX55fNa0NjaVtOIfXMJDJtk6n6SBdSG7UjWNmH6xD+wSRoDlEH0WUfjiqHAb6ayjZ1vDiqDATOXq70+0g==",
+      "path": "unreal.encryption/3.0.1",
+      "hashPath": "unreal.encryption.3.0.1.nupkg.sha512"
+    }
+  }
+}

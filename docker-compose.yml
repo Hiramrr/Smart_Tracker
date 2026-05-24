@@ -35,6 +35,9 @@ services:
       ZOOKEEPER_TICK_TIME: 2000
     ports:
       - "2181:2181"
+    volumes:
+      - zookeeper_data:/var/lib/zookeeper/data
+      - zookeeper_log:/var/lib/zookeeper/log
     networks:
       - miyu-network
 
@@ -53,6 +56,7 @@ services:
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
@@ -67,6 +71,8 @@ services:
       interval: 5s
       timeout: 10s
       retries: 10
+    volumes:
+      - kafka_data:/var/lib/kafka/data
     networks:
       - miyu-network
 
@@ -203,8 +209,33 @@ services:
     networks:
       - miyu-network
 
+  # ==========================================
+  # Job batch ML bajo demanda (clasificacion LoL)
+  # Ejecutar con: docker-compose --profile batch run --rm lol-classifier
+  # ==========================================
+  lol-classifier:
+    build:
+      context: ./etl
+    container_name: miyu-lol-classifier
+    profiles:
+      - batch
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-miyu}:${POSTGRES_PASSWORD:-miyu_secret}@postgres:5432/${POSTGRES_DB:-miyu_datalake}
+    command: ["python", "lol_player_classifier.py"]
+    networks:
+      - miyu-network
+
 volumes:
   postgres_data:
+    driver: local
+  zookeeper_data:
+    driver: local
+  zookeeper_log:
+    driver: local
+  kafka_data:
     driver: local
 
 networks:

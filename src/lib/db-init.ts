@@ -44,11 +44,18 @@ export async function initializeDatabase(): Promise<void> {
             'ranked-current', 'tournaments', 'leaderboard', 'shop',
             'cosmetic-search', 'cosmetic-ingest', 'cosmetic-features',
             'player-tournament-placements', 'tournament-player-stats',
+            'lol-account', 'lol-profile', 'lol-ranked', 'lol-mastery',
+            'lol-matches', 'lol-match', 'lol-overview', 'lol-static-champions',
+            'fortnite-replay-parse',
             'lookup-cached', 'stats-cached', 'tracker-stats-cached',
             'fortnite-api-stats-cached', 'ranked-current-cached',
             'tournaments-cached', 'leaderboard-cached', 'shop-cached',
             'cosmetic-search-cached', 'cosmetic-ingest-cached', 'cosmetic-features-cached',
-            'player-tournament-placements-cached', 'tournament-player-stats-cached'
+            'player-tournament-placements-cached', 'tournament-player-stats-cached',
+            'lol-account-cached', 'lol-profile-cached', 'lol-ranked-cached',
+            'lol-mastery-cached', 'lol-matches-cached', 'lol-match-cached',
+            'lol-overview-cached', 'lol-static-champions-cached',
+            'fortnite-replay-parse-cached'
           ))
         )
       `);
@@ -61,11 +68,16 @@ export async function initializeDatabase(): Promise<void> {
           'ranked-current', 'tournaments', 'leaderboard', 'shop',
           'cosmetic-search', 'cosmetic-ingest', 'cosmetic-features',
           'player-tournament-placements', 'tournament-player-stats',
+          'lol-account', 'lol-profile', 'lol-ranked', 'lol-mastery',
+          'lol-matches', 'lol-match', 'lol-overview', 'lol-static-champions',
           'lookup-cached', 'stats-cached', 'tracker-stats-cached',
           'fortnite-api-stats-cached', 'ranked-current-cached',
           'tournaments-cached', 'leaderboard-cached', 'shop-cached',
           'cosmetic-search-cached', 'cosmetic-ingest-cached', 'cosmetic-features-cached',
-          'player-tournament-placements-cached', 'tournament-player-stats-cached'
+          'player-tournament-placements-cached', 'tournament-player-stats-cached',
+          'lol-account-cached', 'lol-profile-cached', 'lol-ranked-cached',
+          'lol-mastery-cached', 'lol-matches-cached', 'lol-match-cached',
+          'lol-overview-cached', 'lol-static-champions-cached'
         ))
       `);
 
@@ -265,6 +277,185 @@ export async function initializeDatabase(): Promise<void> {
       await client.query(`CREATE INDEX IF NOT EXISTS idx_player_tournament_placements_event ON player_tournament_placements(event_id)`);
       await client.query(`CREATE INDEX IF NOT EXISTS idx_player_tournament_placements_window ON player_tournament_placements(event_window_id)`);
 
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS lol_player_snapshots (
+          id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+          puuid VARCHAR(255) NOT NULL,
+          game_name VARCHAR(255),
+          tag_line VARCHAR(32),
+          platform VARCHAR(20),
+          regional_route VARCHAR(20),
+          summoner_id VARCHAR(255),
+          summoner_level INTEGER,
+          profile_icon_id INTEGER,
+          ranked_data JSONB DEFAULT '[]'::jsonb,
+          mastery_data JSONB DEFAULT '[]'::jsonb,
+          analysis JSONB DEFAULT '{}'::jsonb,
+          raw_json JSONB,
+          captured_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        )
+      `);
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_lol_player_snapshots_puuid ON lol_player_snapshots(puuid)`);
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_lol_player_snapshots_riot_id ON lol_player_snapshots(game_name, tag_line)`);
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_lol_player_snapshots_captured ON lol_player_snapshots(captured_at)`);
+
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS lol_match_snapshots (
+          id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+          match_id VARCHAR(255) NOT NULL,
+          puuid VARCHAR(255) NOT NULL,
+          game_creation TIMESTAMP WITH TIME ZONE,
+          game_duration INTEGER,
+          queue_id INTEGER,
+          raw_json JSONB NOT NULL,
+          captured_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+          CONSTRAINT unique_lol_match_player UNIQUE (match_id, puuid)
+        )
+      `);
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_lol_match_snapshots_match ON lol_match_snapshots(match_id)`);
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_lol_match_snapshots_puuid ON lol_match_snapshots(puuid)`);
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_lol_match_snapshots_created ON lol_match_snapshots(game_creation)`);
+
+      // Tabla fortnite_replays
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS fortnite_replays (
+          id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+          replay_id VARCHAR(255) NOT NULL,
+          file_name VARCHAR(500) NOT NULL,
+          display_name VARCHAR(255),
+          player_id VARCHAR(255),
+          stats_source VARCHAR(50),
+          playlist VARCHAR(255),
+          started_at TIMESTAMP WITH TIME ZONE,
+          duration_seconds INTEGER,
+          total_players INTEGER,
+          placement INTEGER,
+          eliminations INTEGER,
+          team_eliminations INTEGER,
+          deaths INTEGER,
+          damage_to_players INTEGER,
+          damage_from_players INTEGER,
+          accuracy_percent NUMERIC,
+          assists INTEGER,
+          revives INTEGER,
+          materials_gathered INTEGER,
+          materials_used INTEGER,
+          total_traveled INTEGER,
+          event_eliminations INTEGER,
+          kill_feed_events INTEGER,
+          associated_source VARCHAR(20) DEFAULT 'manual',
+          raw_match JSONB,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+          CONSTRAINT unique_replay_player UNIQUE (replay_id, player_id)
+        )
+      `);
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_fortnite_replays_player ON fortnite_replays(player_id)`);
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_fortnite_replays_display_name ON fortnite_replays(display_name)`);
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_fortnite_replays_created ON fortnite_replays(created_at)`);
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_fortnite_replays_playlist ON fortnite_replays(playlist)`);
+
+      // Vista analítica de replays
+      await client.query(`
+        CREATE OR REPLACE VIEW v_fortnite_replay_stats AS
+        SELECT
+          player_id,
+          display_name,
+          COUNT(*) AS total_matches,
+          AVG(placement) AS avg_placement,
+          AVG(eliminations) AS avg_eliminations,
+          AVG(deaths) AS avg_deaths,
+          CASE WHEN SUM(deaths) > 0 THEN SUM(eliminations)::NUMERIC / SUM(deaths) ELSE SUM(eliminations) END AS kd_ratio,
+          SUM(damage_to_players) AS total_damage_dealt,
+          AVG(damage_to_players) AS avg_damage_dealt,
+          AVG(accuracy_percent) AS avg_accuracy,
+          SUM(CASE WHEN placement = 1 THEN 1 ELSE 0 END) AS wins,
+          playlist,
+          DATE(created_at) AS match_date
+        FROM fortnite_replays
+        GROUP BY player_id, display_name, playlist, DATE(created_at)
+      `);
+
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS lol_player_classifications (
+            id SERIAL PRIMARY KEY,
+            puuid VARCHAR(255) NOT NULL,
+            game_name VARCHAR(255),
+            tag_line VARCHAR(32),
+            platform VARCHAR(20),
+            matches_analyzed INTEGER NOT NULL DEFAULT 0,
+            skill_label VARCHAR(100) NOT NULL,
+            skill_value NUMERIC NOT NULL,
+            playstyle_label VARCHAR(100),
+            main_role VARCHAR(50),
+            main_champion VARCHAR(100),
+            win_rate NUMERIC,
+            avg_kda NUMERIC,
+            avg_kills NUMERIC,
+            avg_deaths NUMERIC,
+            avg_assists NUMERIC,
+            avg_cs_per_min NUMERIC,
+            avg_gold_per_min NUMERIC,
+            ranked_score NUMERIC,
+            ranked_tier VARCHAR(100),
+            predicted_rank VARCHAR(100),
+            predicted_rank_score NUMERIC,
+            rank_prediction_confidence VARCHAR(50),
+            rank_prediction_reasoning TEXT,
+            focus_areas JSONB DEFAULT '[]'::jsonb,
+            champion_recommendations JSONB DEFAULT '[]'::jsonb,
+            next_pick JSONB DEFAULT '{}'::jsonb,
+            beginner_pick JSONB DEFAULT '{}'::jsonb,
+            cluster_id INTEGER,
+            model_name VARCHAR(120) NOT NULL,
+            features JSONB,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        )
+      `);
+      await client.query(`ALTER TABLE lol_player_classifications ADD COLUMN IF NOT EXISTS predicted_rank VARCHAR(100)`);
+      await client.query(`ALTER TABLE lol_player_classifications ADD COLUMN IF NOT EXISTS predicted_rank_score NUMERIC`);
+      await client.query(`ALTER TABLE lol_player_classifications ADD COLUMN IF NOT EXISTS rank_prediction_confidence VARCHAR(50)`);
+      await client.query(`ALTER TABLE lol_player_classifications ADD COLUMN IF NOT EXISTS rank_prediction_reasoning TEXT`);
+      await client.query(`ALTER TABLE lol_player_classifications ADD COLUMN IF NOT EXISTS focus_areas JSONB DEFAULT '[]'::jsonb`);
+      await client.query(`ALTER TABLE lol_player_classifications ADD COLUMN IF NOT EXISTS champion_recommendations JSONB DEFAULT '[]'::jsonb`);
+      await client.query(`ALTER TABLE lol_player_classifications ADD COLUMN IF NOT EXISTS next_pick JSONB DEFAULT '{}'::jsonb`);
+      await client.query(`ALTER TABLE lol_player_classifications ADD COLUMN IF NOT EXISTS beginner_pick JSONB DEFAULT '{}'::jsonb`);
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_lol_classifications_puuid ON lol_player_classifications(puuid)`);
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_lol_classifications_created ON lol_player_classifications(created_at)`);
+
+      await client.query(`
+        CREATE OR REPLACE VIEW v_lol_match_features AS
+        SELECT
+          m.match_id,
+          m.puuid,
+          m.game_creation,
+          COALESCE((m.raw_json->'info'->>'gameDuration')::NUMERIC, m.game_duration) AS game_duration_seconds,
+          COALESCE((m.raw_json->'info'->>'queueId')::INTEGER, m.queue_id) AS queue_id,
+          participant.value->>'championName' AS champion_name,
+          (participant.value->>'championId')::INTEGER AS champion_id,
+          participant.value->>'teamPosition' AS team_position,
+          participant.value->>'individualPosition' AS individual_position,
+          COALESCE((participant.value->>'win')::BOOLEAN, FALSE) AS win,
+          COALESCE((participant.value->>'kills')::NUMERIC, 0) AS kills,
+          COALESCE((participant.value->>'deaths')::NUMERIC, 0) AS deaths,
+          COALESCE((participant.value->>'assists')::NUMERIC, 0) AS assists,
+          COALESCE((participant.value->>'goldEarned')::NUMERIC, 0) AS gold_earned,
+          COALESCE((participant.value->>'totalMinionsKilled')::NUMERIC, 0)
+            + COALESCE((participant.value->>'neutralMinionsKilled')::NUMERIC, 0) AS cs,
+          participant.value AS participant_json,
+          m.captured_at
+        FROM lol_match_snapshots m
+        CROSS JOIN LATERAL jsonb_array_elements(COALESCE(m.raw_json->'info'->'participants', '[]'::jsonb)) AS participant(value)
+        WHERE participant.value->>'puuid' = m.puuid
+      `);
+
+      await client.query(`
+        CREATE OR REPLACE VIEW v_mart_lol_player_classification AS
+        SELECT DISTINCT ON (c.puuid)
+          c.*
+        FROM lol_player_classifications c
+        ORDER BY c.puuid, c.created_at DESC
+      `);
+
       // Vistas analíticas
       await client.query(`
         CREATE OR REPLACE VIEW v_api_calls_hourly AS
@@ -392,6 +583,7 @@ export async function initializeDatabase(): Promise<void> {
           CASE
             WHEN action LIKE '%cached' THEN 'cache'
             WHEN action IN ('shop', 'cosmetic-search', 'cosmetic-ingest', 'cosmetic-features') THEN 'cosmetics'
+            WHEN action LIKE 'lol-%' THEN 'league-of-legends'
             WHEN action IN ('tournaments', 'leaderboard', 'player-tournament-placements', 'tournament-player-stats') THEN 'tournaments'
             WHEN action IN ('lookup', 'stats', 'tracker-stats', 'fortnite-api-stats', 'ranked-current') THEN 'player'
             ELSE 'other'

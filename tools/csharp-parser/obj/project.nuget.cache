@@ -1,0 +1,15 @@
+{
+  "version": 2,
+  "dgSpecHash": "i1pZ4sDvd84=",
+  "success": true,
+  "projectFilePath": "/Users/hiram/Proyectos/smart_tracker/Miyu Tracker/tools/csharp-parser/FortniteReplayCSharpParser.csproj",
+  "expectedPackageFiles": [
+    "/Users/hiram/.nuget/packages/fortnitereplayreader/3.0.1/fortnitereplayreader.3.0.1.nupkg.sha512",
+    "/Users/hiram/.nuget/packages/microsoft.extensions.dependencyinjection.abstractions/10.0.0/microsoft.extensions.dependencyinjection.abstractions.10.0.0.nupkg.sha512",
+    "/Users/hiram/.nuget/packages/microsoft.extensions.logging.abstractions/10.0.0/microsoft.extensions.logging.abstractions.10.0.0.nupkg.sha512",
+    "/Users/hiram/.nuget/packages/oozsharp/3.0.1/oozsharp.3.0.1.nupkg.sha512",
+    "/Users/hiram/.nuget/packages/unreal.core/3.0.1/unreal.core.3.0.1.nupkg.sha512",
+    "/Users/hiram/.nuget/packages/unreal.encryption/3.0.1/unreal.encryption.3.0.1.nupkg.sha512"
+  ],
+  "logs": []
+}

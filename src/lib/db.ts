@@ -184,6 +184,17 @@ export function getCacheTtl(action: string): number {
       return 60; // 1 hora (estadísticas cambian con frecuencia)
     case "ranked-current":
       return 15; // 15 minutos (rank cambia rápido)
+    case "lol-overview":
+    case "lol-matches":
+      return 15; // historial reciente/ranked puede cambiar rapido
+    case "lol-ranked":
+      return 30;
+    case "lol-mastery":
+      return 60 * 6;
+    case "lol-account":
+    case "lol-profile":
+    case "lol-static-champions":
+      return 60 * 24;
     case "shop":
       return 60; // 1 hora (tienda cambia cada 24h)
     case "tournaments":

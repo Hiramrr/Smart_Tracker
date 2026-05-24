@@ -52,9 +52,14 @@ docker-compose up -d --build
 # Ver logs
 docker-compose logs -f
 
-# Detener y eliminar volúmenes
+# Detener conservando datos persistidos
+docker-compose down
+
+# Detener y eliminar volúmenes persistentes
 docker-compose down -v
 ```
+
+PostgreSQL, Kafka y Zookeeper usan volúmenes Docker nombrados para conservar el data lake, topics, offsets y metadatos del cluster entre reinicios. `docker-compose down -v` elimina esos volúmenes y debe usarse solo para reiniciar el entorno desde cero.
 
 ## 📊 Flujo de Datos
 

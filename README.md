@@ -1,6 +1,6 @@
 # Miyu Tracker - Proyecto Final de Ingeniería de Datos
 
-Miyu Tracker es una solución de ingeniería de datos para analizar actividad competitiva y cosméticos de Fortnite. El sistema captura consultas a APIs externas, almacena datos crudos e históricos, procesa eventos en streaming, ejecuta transformaciones batch/ML y expone resultados en dashboards.
+Miyu Tracker es una solución de ingeniería de datos para analizar actividad competitiva y cosméticos de Fortnite, además de perfiles competitivos de League of Legends. El sistema captura consultas a APIs externas, almacena datos crudos e históricos, procesa eventos en streaming, ejecuta transformaciones batch/ML y expone resultados en dashboards.
 
 ## Problema
 
@@ -47,11 +47,11 @@ La arquitectura combina procesamiento histórico y procesamiento continuo. El pa
 | Capa | Implementación | Archivos principales |
 | --- | --- | --- |
 | App y API | Next.js 16, React 19 | `src/app`, `src/components` |
-| Ingesta | API routes que consultan fuentes externas y registran eventos | `src/app/api/osirion/route.ts` |
+| Ingesta | API routes que consultan fuentes externas y registran eventos | `src/app/api/osirion/route.ts`, `src/app/api/lol/route.ts` |
 | Streaming | Kafka + producer outbox + consumer | `producer/index.ts`, `consumer/index.ts` |
 | Almacenamiento | PostgreSQL como data lake operacional | `sql/init.sql` |
 | ETL streaming | Python consume Kafka y calcula progreso/torneos | `etl/transform.py` |
-| Batch/ML | Random Forest para predicción de regreso de cosméticos | `etl/cosmetic_predictions.py` |
+| Batch/ML | Random Forest para cosméticos y KMeans para clasificación LoL | `etl/cosmetic_predictions.py`, `etl/lol_player_classifier.py` |
 | Warehouse | Vistas dimensionales y marts analíticos | `v_dim_*`, `v_fact_*`, `v_mart_*` |
 | Visualización | Dashboards de jugador, torneos, tienda y data lake | `/dashboard/*` |
 
@@ -61,7 +61,7 @@ La capa warehouse está implementada como vistas SQL sobre el data lake:
 
 - Dimensiones: `v_dim_date`, `v_dim_api_action`, `v_dim_player`, `v_dim_cosmetic`.
 - Hechos: `v_fact_api_calls`, `v_fact_shop_appearances`, `v_fact_player_progress`.
-- Marts: `v_mart_api_reliability_daily`, `v_mart_shop_predictions`.
+- Marts: `v_mart_api_reliability_daily`, `v_mart_shop_predictions`, `v_mart_lol_player_classification`.
 
 Estas vistas separan el almacenamiento crudo de la consulta analítica. El dashboard `/dashboard/warehouse` consume estas vistas para mostrar conteos de dimensiones, hechos, confiabilidad diaria, dimensiones y predicciones.
 
@@ -81,6 +81,15 @@ Las predicciones se ven en:
 - `/dashboard/warehouse`: mart dimensional completo.
 - `/dashboard/shop`: bloque "modelo batch / ml" y tarjetas de artículos cuando hay coincidencia por `cosmetic_id`.
 
+El job batch `lol-classifier` ejecuta `etl/lol_player_classifier.py`. El modelo:
+
+1. Lee partidas crudas desde `lol_match_snapshots`.
+2. Normaliza features por jugador en `v_lol_match_features`.
+3. Agrega KDA, win rate, CS/min, oro/min, rol, campeón principal y señal ranked.
+4. Clasifica jugadores con `KMeans` cuando hay suficientes jugadores y usa una regla de score como fallback para pocos datos.
+5. Guarda resultados en `lol_player_classifications`.
+6. Expone la última clasificación por jugador en `v_mart_lol_player_classification`.
+
 ## Comandos
 
 Configura variables:
@@ -95,6 +104,8 @@ Levanta todo el stack:
 docker-compose up --build
 ```
 
+Los datos de PostgreSQL, Kafka y Zookeeper se guardan en volúmenes Docker nombrados (`postgres_data`, `kafka_data`, `zookeeper_data`, `zookeeper_log`), por lo que se conservan al detener el stack con `docker-compose down`.
+
 Servicios principales:
 
 - App: `http://localhost:3000`
@@ -105,6 +116,12 @@ Ejecuta predicciones batch después de tener historial de tienda:
 
 ```bash
 docker-compose --profile batch run --rm cosmetic-predictor
+```
+
+Ejecuta clasificación batch de League of Legends después de consultar jugadores:
+
+```bash
+docker-compose --profile batch run --rm lol-classifier
 ```
 
 Consulta el data lake:
@@ -119,7 +136,9 @@ Apaga y limpia volúmenes:
 docker-compose down -v
 ```
 
-Para desarrollo local sin Docker también existe el script `npm run cosmetic:predict`, pero el flujo recomendado para la entrega es usar Compose.
+Usa `docker-compose down -v` solo cuando quieras borrar el historial almacenado y reiniciar el data lake desde cero.
+
+Para desarrollo local sin Docker también existen `npm run cosmetic:predict` y `npm run lol:classify`, pero el flujo recomendado para la entrega es usar Compose.
 
 ## Demo Sugerida Para Video
 
