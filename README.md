@@ -90,6 +90,21 @@ El job batch `lol-classifier` ejecuta `etl/lol_player_classifier.py`. El modelo:
 5. Guarda resultados en `lol_player_classifications`.
 6. Expone la última clasificación por jugador en `v_mart_lol_player_classification`.
 
+## Enfoque de arquitectura Kappa
+
+Smart Tracker utiliza un enfoque inspirado en arquitectura Kappa, donde los eventos generados por la aplicación se manejan como una fuente principal de datos para procesamiento continuo y reprocesamiento histórico.
+
+El flujo inicia cuando la aplicación consulta fuentes externas como Fortnite API, Osirion o Tracker.gg. Cada interacción genera un evento que se registra en una tabla tipo outbox (`api_outbox`). Posteriormente, un producer publica esos eventos en Kafka dentro del topic `api-calls`. Un consumer procesa continuamente los eventos y los persiste en PostgreSQL, generando tablas históricas y estructuras analíticas.
+
+A diferencia de una arquitectura Lambda tradicional, donde existen caminos separados para batch y streaming, el sistema busca que los eventos sean la base común para:
+
+1. Procesamiento en tiempo real (consumer Kafka → `stream_api_metrics_minute`).
+2. Persistencia histórica (tablas crudas y snapshots).
+3. Reprocesamiento de métricas (`npm run stream:rebuild`).
+4. Alimentación de vistas analíticas y procesos batch/ML.
+
+El script `stream:rebuild` permite reconstruir métricas a partir de los datos almacenados, lo que representa el componente de reprocesamiento histórico dentro del enfoque Kappa.
+
 ## Comandos
 
 Configura variables:
@@ -138,6 +153,24 @@ docker-compose down -v
 
 Usa `docker-compose down -v` solo cuando quieras borrar el historial almacenado y reiniciar el data lake desde cero.
 
+Exportar datasets generados desde la base de datos:
+
+```bash
+npm run datasets:export
+```
+
+Ejecutar demo completa automatizada:
+
+```bash
+./scripts/demo.sh
+```
+
+Consultar métricas analíticas directamente:
+
+```bash
+psql postgres://miyu:miyu_secret@localhost:5432/miyu_datalake -f sql/analytics_queries.sql
+```
+
 Para desarrollo local sin Docker también existen `npm run cosmetic:predict` y `npm run lol:classify`, pero el flujo recomendado para la entrega es usar Compose.
 
 ## Demo Sugerida Para Video
@@ -154,14 +187,13 @@ Para desarrollo local sin Docker también existen `npm run cosmetic:predict` y `
 
 Archivos incluidos:
 
-- Código fuente del proyecto.
-- `docker-compose.yml`, Dockerfiles y scripts.
-- SQL de esquema, data lake y warehouse.
-- ETL Python y job batch/ML.
-- Documentación técnica en Markdown: `DATA-ENGINEERING.md`, `ARCHITECTURE.md`, `README-DATA-ENGINEERING.md`.
-
-Pendiente para entrega final:
-
-- Exportar o adjuntar datasets/dumps de ejemplo.
-- Generar PDF técnico con capturas.
-- Grabar video de máximo 5 minutos.
+- Código fuente completo del proyecto.
+- `docker-compose.yml`, Dockerfiles y scripts de automatización.
+- SQL de esquema, data lake, warehouse y consultas analíticas (`sql/analytics_queries.sql`).
+- ETL Python y jobs batch/ML (RandomForest y KMeans).
+- Datasets de ejemplo en `datasets/` (NDJSON + CSV).
+- Script de exportación de datasets (`scripts/export-datasets.ts`).
+- Script de demo automatizada (`scripts/demo.sh`).
+- Guía técnica de demo (`DEMO.md`).
+- Tabla de evidencias técnicas (`TECHNICAL_EVIDENCE.md`).
+- Documentación técnica: `DATA-ENGINEERING.md`, `ARCHITECTURE.md`, `README-DATA-ENGINEERING.md`.

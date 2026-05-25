@@ -13,6 +13,8 @@
     "seed:data": "tsx scripts/seed-data-engineering.ts",
     "stream:rebuild": "tsx scripts/rebuild-stream-metrics.ts",
     "schema:check": "tsx scripts/check-schema-sync.ts",
+    "datasets:export": "tsx scripts/export-datasets.ts",
+    "demo:full": "bash scripts/demo.sh",
     "docker:up": "docker-compose up --build",
     "docker:down": "docker-compose down -v"
   },
