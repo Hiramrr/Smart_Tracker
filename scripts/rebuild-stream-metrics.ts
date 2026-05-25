@@ -73,8 +73,8 @@ async function upsertMetric(event: ApiEvent) {
       total_duration_ms, total_response_size, min_duration_ms, max_duration_ms,
       first_event_at, last_event_at
     ) VALUES (
-      DATE_TRUNC('minute', $1::timestamptz), $2, $3, 1, $4, $5,
-      $6, $7, $6, $6, $1::timestamptz, $1::timestamptz
+      DATE_TRUNC('minute', $1::timestamptz), $2, $3, 1, $4::integer, $5::integer,
+      $6::bigint, $7::bigint, $6::integer, $6::integer, $1::timestamptz, $1::timestamptz
     )
     ON CONFLICT (window_start, action, api_source)
     DO UPDATE SET

@@ -1,4 +1,4 @@
-"cosmetic_id","name","type","rarity","predicted_days_until_next","predicted_next_shop_date","confidence_score","model_name","appearances_count","last_seen","avg_days_between_appearances","created_at"
-"seed-skin-001","Data Drift","Outfit","Epic",2.4,"2026-05-27",0.82,"RandomForestRegressor-v1",9,"2026-05-25",2.3,"2026-05-25T15:00:00.000Z"
-"seed-pickaxe-001","Pipeline Pick","Pickaxe","Rare",3.1,"2026-05-28",0.75,"RandomForestRegressor-v1",6,"2026-05-25",3.2,"2026-05-25T15:00:00.000Z"
-"seed-emote-001","Batch Shuffle","Emote","Uncommon",4.8,"2026-05-30",0.68,"RandomForestRegressor-v1",5,"2026-05-25",4.5,"2026-05-25T15:00:00.000Z"
+cosmetic_id,name,type,rarity,predicted_days_until_next,predicted_next_shop_date,confidence_score,model_name,created_at
+"seed-pickaxe-001","Pipeline Pick","Pickaxe","Rare","1.0","Tue May 26 2026 00:00:00 GMT-0600 (Central Standard Time)","0.6239","cosmetic_shop_gap_random_forest_v1","Mon May 25 2026 11:48:19 GMT-0600 (Central Standard Time)"
+"seed-emote-001","Batch Shuffle","Emote","Uncommon","1.99","Wed May 27 2026 00:00:00 GMT-0600 (Central Standard Time)","0.5601","cosmetic_shop_gap_random_forest_v1","Mon May 25 2026 11:48:19 GMT-0600 (Central Standard Time)"
+"seed-skin-001","Data Drift","Outfit","Epic","1.31","Tue May 26 2026 00:00:00 GMT-0600 (Central Standard Time)","0.7163","cosmetic_shop_gap_random_forest_v1","Mon May 25 2026 11:48:19 GMT-0600 (Central Standard Time)"
