@@ -1,5 +1,5 @@
 import { Kafka, Consumer, EachMessagePayload } from "kafkajs";
-import { Pool } from "pg";
+import { Pool, type PoolClient } from "pg";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -76,6 +76,7 @@ async function run() {
   // Conectar a Kafka
   await consumer.connect();
   await consumer.subscribe({ topic: KAFKA_TOPIC, fromBeginning: false });
+  await ensureStreamingSchema();
 
   console.log("[Consumer] Suscrito al topic. Esperando mensajes...");
 
@@ -85,9 +86,9 @@ async function run() {
     autoCommitInterval: 5000,
     eachMessage: async ({ partition, message }: EachMessagePayload) => {
       if (isShuttingDown) return;
+      const value = message.value?.toString() ?? "";
 
       try {
-        const value = message.value?.toString();
         if (!value) {
           console.warn("[Consumer] Mensaje vacío recibido");
           return;
@@ -101,10 +102,76 @@ async function run() {
         console.log(`[Consumer] Evento persistido: ${event.id}`);
       } catch (error) {
         console.error("[Consumer] Error procesando mensaje:", error);
-        // No lanzamos error para no detener el consumer
+        await persistDeadLetter({
+          topic: KAFKA_TOPIC,
+          partition,
+          offset: message.offset,
+          key: message.key?.toString() ?? null,
+          rawValue: value,
+          error,
+        });
       }
     },
   });
+}
+
+async function ensureStreamingSchema() {
+  await pool.query(`CREATE EXTENSION IF NOT EXISTS "uuid-ossp"`);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS stream_api_metrics_minute (
+      window_start TIMESTAMP WITH TIME ZONE NOT NULL,
+      action VARCHAR(100) NOT NULL,
+      api_source VARCHAR(50) NOT NULL DEFAULT 'unknown',
+      total_events INTEGER NOT NULL DEFAULT 0,
+      success_count INTEGER NOT NULL DEFAULT 0,
+      error_count INTEGER NOT NULL DEFAULT 0,
+      total_duration_ms BIGINT NOT NULL DEFAULT 0,
+      total_response_size BIGINT NOT NULL DEFAULT 0,
+      min_duration_ms INTEGER,
+      max_duration_ms INTEGER,
+      first_event_at TIMESTAMP WITH TIME ZONE,
+      last_event_at TIMESTAMP WITH TIME ZONE,
+      updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+      PRIMARY KEY (window_start, action, api_source)
+    )
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_stream_api_metrics_minute_updated ON stream_api_metrics_minute(updated_at)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_stream_api_metrics_minute_action ON stream_api_metrics_minute(action)`);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS stream_dead_letters (
+      id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      topic VARCHAR(100) NOT NULL,
+      partition_id INTEGER,
+      offset_value VARCHAR(100),
+      message_key TEXT,
+      raw_value TEXT,
+      error_message TEXT NOT NULL,
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    )
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_stream_dead_letters_created ON stream_dead_letters(created_at)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_stream_dead_letters_topic ON stream_dead_letters(topic)`);
+}
+
+async function persistDeadLetter(options: {
+  topic: string;
+  partition: number;
+  offset: string;
+  key: string | null;
+  rawValue: string;
+  error: unknown;
+}) {
+  const message = options.error instanceof Error ? options.error.message : String(options.error);
+  try {
+    await pool.query(
+      `INSERT INTO stream_dead_letters (
+         topic, partition_id, offset_value, message_key, raw_value, error_message
+       ) VALUES ($1, $2, $3, $4, $5, $6)`,
+      [options.topic, options.partition, options.offset, options.key, options.rawValue, message]
+    );
+  } catch (error) {
+    console.error("[Consumer] No se pudo persistir DLQ:", error);
+  }
 }
 
 // ==========================================
@@ -141,6 +208,8 @@ async function persistApiCall(event: ApiCallEvent) {
         event.timestamp,
       ]
     );
+
+    await upsertStreamMinuteMetric(client, event);
 
     // Si se insertó y hay datos de respuesta, guardar en api_responses
     if (apiCallResult.rowCount && apiCallResult.rowCount > 0 && event.responseBody) {
@@ -351,6 +420,61 @@ async function persistApiCall(event: ApiCallEvent) {
   } finally {
     client.release();
   }
+}
+
+async function upsertStreamMinuteMetric(client: PoolClient, event: ApiCallEvent) {
+  const eventTimestamp = event.timestamp || new Date().toISOString();
+  const durationMs = Number.isFinite(Number(event.durationMs)) ? Number(event.durationMs) : 0;
+  const responseSize = Number.isFinite(Number(event.responseSize)) ? Number(event.responseSize) : 0;
+  const responseStatus = Number.isFinite(Number(event.responseStatus)) ? Number(event.responseStatus) : 0;
+  const successCount = responseStatus > 0 && responseStatus < 400 ? 1 : 0;
+  const errorCount = responseStatus >= 400 ? 1 : 0;
+
+  await client.query(
+    `
+    INSERT INTO stream_api_metrics_minute (
+      window_start, action, api_source, total_events, success_count, error_count,
+      total_duration_ms, total_response_size, min_duration_ms, max_duration_ms,
+      first_event_at, last_event_at
+    ) VALUES (
+      DATE_TRUNC('minute', $1::timestamptz), $2, $3, 1, $4, $5,
+      $6, $7, $6, $6, $1::timestamptz, $1::timestamptz
+    )
+    ON CONFLICT (window_start, action, api_source)
+    DO UPDATE SET
+      total_events = stream_api_metrics_minute.total_events + 1,
+      success_count = stream_api_metrics_minute.success_count + EXCLUDED.success_count,
+      error_count = stream_api_metrics_minute.error_count + EXCLUDED.error_count,
+      total_duration_ms = stream_api_metrics_minute.total_duration_ms + EXCLUDED.total_duration_ms,
+      total_response_size = stream_api_metrics_minute.total_response_size + EXCLUDED.total_response_size,
+      min_duration_ms = LEAST(
+        COALESCE(stream_api_metrics_minute.min_duration_ms, EXCLUDED.min_duration_ms),
+        EXCLUDED.min_duration_ms
+      ),
+      max_duration_ms = GREATEST(
+        COALESCE(stream_api_metrics_minute.max_duration_ms, EXCLUDED.max_duration_ms),
+        EXCLUDED.max_duration_ms
+      ),
+      first_event_at = LEAST(
+        COALESCE(stream_api_metrics_minute.first_event_at, EXCLUDED.first_event_at),
+        EXCLUDED.first_event_at
+      ),
+      last_event_at = GREATEST(
+        COALESCE(stream_api_metrics_minute.last_event_at, EXCLUDED.last_event_at),
+        EXCLUDED.last_event_at
+      ),
+      updated_at = NOW()
+    `,
+    [
+      eventTimestamp,
+      event.action,
+      event.apiSource || "unknown",
+      successCount,
+      errorCount,
+      durationMs,
+      responseSize,
+    ]
+  );
 }
 
 function toNumber(value: unknown): number | null {

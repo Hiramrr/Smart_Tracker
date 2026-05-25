@@ -228,6 +228,50 @@ services:
     networks:
       - miyu-network
 
+  # ==========================================
+  # Scheduler batch continuo (cada 6 horas por defecto)
+  # Ejecuta predicciones de tienda y clasificacion LoL
+  # ==========================================
+  batch-scheduler:
+    build:
+      context: ./etl
+    container_name: miyu-batch-scheduler
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-miyu}:${POSTGRES_PASSWORD:-miyu_secret}@postgres:5432/${POSTGRES_DB:-miyu_datalake}
+      BATCH_INTERVAL_SECONDS: ${BATCH_INTERVAL_SECONDS:-21600}
+      BATCH_RUN_ON_START: ${BATCH_RUN_ON_START:-true}
+    command: ["python", "batch_scheduler.py"]
+    networks:
+      - miyu-network
+
+  # ==========================================
+  # Seed reproducible para evaluacion local
+  # Ejecutar con: docker-compose --profile seed run --rm seed-data
+  # ==========================================
+  seed-data:
+    build:
+      context: .
+      dockerfile: producer/Dockerfile
+    container_name: miyu-seed-data
+    profiles:
+      - seed
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-miyu}:${POSTGRES_PASSWORD:-miyu_secret}@postgres:5432/${POSTGRES_DB:-miyu_datalake}
+      KAFKA_BROKER: kafka:29092
+      KAFKA_TOPIC_API_CALLS: api-calls
+    command: ["npx", "tsx", "scripts/seed-data-engineering.ts"]
+    networks:
+      - miyu-network
+
 volumes:
   postgres_data:
     driver: local

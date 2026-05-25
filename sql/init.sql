@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS api_calls (
         'player-tournament-placements', 'tournament-player-stats',
         'lol-account', 'lol-profile', 'lol-ranked', 'lol-mastery',
         'lol-matches', 'lol-match', 'lol-overview', 'lol-static-champions',
+        'fortnite-replay-parse',
         'lookup-cached', 'stats-cached', 'tracker-stats-cached',
         'fortnite-api-stats-cached', 'ranked-current-cached',
         'tournaments-cached', 'leaderboard-cached', 'shop-cached',
@@ -39,7 +40,8 @@ CREATE TABLE IF NOT EXISTS api_calls (
         'player-tournament-placements-cached', 'tournament-player-stats-cached',
         'lol-account-cached', 'lol-profile-cached', 'lol-ranked-cached',
         'lol-mastery-cached', 'lol-matches-cached', 'lol-match-cached',
-        'lol-overview-cached', 'lol-static-champions-cached'
+        'lol-overview-cached', 'lol-static-champions-cached',
+        'fortnite-replay-parse-cached'
     ))
 );
 
@@ -681,6 +683,63 @@ CREATE TRIGGER trg_api_call_to_outbox
 AFTER INSERT ON api_calls
 FOR EACH ROW
 EXECUTE FUNCTION fn_api_call_to_outbox();
+
+-- ==========================================
+-- Streaming materializado + DLQ
+-- ==========================================
+
+CREATE TABLE IF NOT EXISTS stream_api_metrics_minute (
+    window_start TIMESTAMP WITH TIME ZONE NOT NULL,
+    action VARCHAR(100) NOT NULL,
+    api_source VARCHAR(50) NOT NULL DEFAULT 'unknown',
+    total_events INTEGER NOT NULL DEFAULT 0,
+    success_count INTEGER NOT NULL DEFAULT 0,
+    error_count INTEGER NOT NULL DEFAULT 0,
+    total_duration_ms BIGINT NOT NULL DEFAULT 0,
+    total_response_size BIGINT NOT NULL DEFAULT 0,
+    min_duration_ms INTEGER,
+    max_duration_ms INTEGER,
+    first_event_at TIMESTAMP WITH TIME ZONE,
+    last_event_at TIMESTAMP WITH TIME ZONE,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    PRIMARY KEY (window_start, action, api_source)
+);
+
+CREATE INDEX IF NOT EXISTS idx_stream_api_metrics_minute_updated ON stream_api_metrics_minute(updated_at);
+CREATE INDEX IF NOT EXISTS idx_stream_api_metrics_minute_action ON stream_api_metrics_minute(action);
+
+CREATE TABLE IF NOT EXISTS stream_dead_letters (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    topic VARCHAR(100) NOT NULL,
+    partition_id INTEGER,
+    offset_value VARCHAR(100),
+    message_key TEXT,
+    raw_value TEXT,
+    error_message TEXT NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_stream_dead_letters_created ON stream_dead_letters(created_at);
+CREATE INDEX IF NOT EXISTS idx_stream_dead_letters_topic ON stream_dead_letters(topic);
+
+CREATE OR REPLACE VIEW v_stream_api_metrics_latest AS
+SELECT
+    window_start,
+    action,
+    api_source,
+    total_events,
+    success_count,
+    error_count,
+    ROUND((error_count::numeric / NULLIF(total_events, 0)) * 100, 2) AS error_rate_pct,
+    ROUND((total_duration_ms::numeric / NULLIF(total_events, 0)), 2) AS avg_duration_ms,
+    min_duration_ms,
+    max_duration_ms,
+    total_response_size,
+    first_event_at,
+    last_event_at,
+    updated_at
+FROM stream_api_metrics_minute
+ORDER BY window_start DESC, total_events DESC;
 -- ==========================================
 -- Capa de Transformación (ETL)
 -- ==========================================

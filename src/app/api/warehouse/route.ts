@@ -28,8 +28,11 @@ function emptyWarehouse() {
     marts: {
       reliabilityRows: 0,
       predictionRows: 0,
+      streamWindows: 0,
+      deadLetters: 0,
     },
     reliability: [],
+    streamMetrics: [],
     apiActions: [],
     players: [],
     cosmetics: [],
@@ -61,7 +64,9 @@ export async function GET() {
          (SELECT COUNT(*) FROM v_fact_shop_appearances) AS fact_shop_appearances,
          (SELECT COUNT(*) FROM v_fact_player_progress) AS fact_player_progress,
          (SELECT COUNT(*) FROM v_mart_api_reliability_daily) AS mart_reliability_rows,
-         (SELECT COUNT(*) FROM v_mart_shop_predictions WHERE predicted_next_shop_date IS NOT NULL) AS mart_prediction_rows`
+         (SELECT COUNT(*) FROM v_mart_shop_predictions WHERE predicted_next_shop_date IS NOT NULL) AS mart_prediction_rows,
+         (SELECT COUNT(*) FROM stream_api_metrics_minute) AS stream_windows,
+         (SELECT COUNT(*) FROM stream_dead_letters) AS dead_letters`
     );
 
     const reliability = await query(
@@ -88,6 +93,23 @@ export async function GET() {
        FROM v_dim_api_action
        ORDER BY business_domain, action
        LIMIT 20`
+    );
+
+    const streamMetrics = await query(
+      `SELECT
+         window_start,
+         action,
+         api_source,
+         total_events,
+         success_count,
+         error_count,
+         error_rate_pct,
+         avg_duration_ms,
+         min_duration_ms,
+         max_duration_ms,
+         last_event_at
+       FROM v_stream_api_metrics_latest
+       LIMIT 12`
     );
 
     const players = await query(
@@ -170,6 +192,8 @@ export async function GET() {
         marts: {
           reliabilityRows: toInt(row.mart_reliability_rows),
           predictionRows: toInt(row.mart_prediction_rows),
+          streamWindows: toInt(row.stream_windows),
+          deadLetters: toInt(row.dead_letters),
         },
         reliability: reliability.rows.map((item) => ({
           dateKey: item.date_key,
@@ -180,6 +204,19 @@ export async function GET() {
           maxDurationMs: toInt(item.max_duration_ms),
           errors: toInt(item.errors),
           errorRatePct: toFloat(item.error_rate_pct),
+        })),
+        streamMetrics: streamMetrics.rows.map((item) => ({
+          windowStart: item.window_start,
+          action: item.action,
+          apiSource: item.api_source,
+          totalEvents: toInt(item.total_events),
+          successCount: toInt(item.success_count),
+          errorCount: toInt(item.error_count),
+          errorRatePct: toFloat(item.error_rate_pct),
+          avgDurationMs: toFloat(item.avg_duration_ms),
+          minDurationMs: toInt(item.min_duration_ms),
+          maxDurationMs: toInt(item.max_duration_ms),
+          lastEventAt: item.last_event_at,
         })),
         apiActions: apiActions.rows,
         players: players.rows,

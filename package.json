@@ -10,6 +10,9 @@
     "consumer": "tsx consumer/index.ts",
     "cosmetic:predict": "python3 etl/cosmetic_predictions.py",
     "lol:classify": "python3 etl/lol_player_classifier.py",
+    "seed:data": "tsx scripts/seed-data-engineering.ts",
+    "stream:rebuild": "tsx scripts/rebuild-stream-metrics.ts",
+    "schema:check": "tsx scripts/check-schema-sync.ts",
     "docker:up": "docker-compose up --build",
     "docker:down": "docker-compose down -v"
   },

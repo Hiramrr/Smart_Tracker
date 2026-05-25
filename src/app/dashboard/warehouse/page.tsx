@@ -38,6 +38,8 @@ type WarehouseData = {
   marts: {
     reliabilityRows: number;
     predictionRows: number;
+    streamWindows: number;
+    deadLetters: number;
   };
   reliability: Array<{
     dateKey: string;
@@ -48,6 +50,19 @@ type WarehouseData = {
     maxDurationMs: number;
     errors: number;
     errorRatePct: number;
+  }>;
+  streamMetrics: Array<{
+    windowStart: string;
+    apiSource: string;
+    action: string;
+    totalEvents: number;
+    successCount: number;
+    errorCount: number;
+    errorRatePct: number;
+    avgDurationMs: number;
+    minDurationMs: number;
+    maxDurationMs: number;
+    lastEventAt: string;
   }>;
   apiActions: Array<{
     action_key: number;
@@ -100,8 +115,9 @@ type WarehouseData = {
 const EMPTY_WAREHOUSE: WarehouseData = {
   dimensions: { dates: 0, apiActions: 0, players: 0, cosmetics: 0 },
   facts: { apiCalls: 0, shopAppearances: 0, playerProgress: 0 },
-  marts: { reliabilityRows: 0, predictionRows: 0 },
+  marts: { reliabilityRows: 0, predictionRows: 0, streamWindows: 0, deadLetters: 0 },
   reliability: [],
+  streamMetrics: [],
   apiActions: [],
   players: [],
   cosmetics: [],
@@ -248,11 +264,28 @@ export default function WarehouseDashboard() {
           <div className="grid gap-3">
             <MiniStat label="v_mart_api_reliability_daily" value={warehouse.marts.reliabilityRows} />
             <MiniStat label="v_mart_shop_predictions" value={warehouse.marts.predictionRows} />
+            <MiniStat label="stream_api_metrics_minute" value={warehouse.marts.streamWindows} />
+            <MiniStat label="stream_dead_letters" value={warehouse.marts.deadLetters} />
           </div>
         </Panel>
       </div>
 
       <div className="grid gap-6 xl:grid-cols-2">
+        <Panel title="v_stream_api_metrics_latest" icon={Activity}>
+          <Table
+            headers={["ventana", "accion", "eventos", "ok", "error %", "avg ms"]}
+            empty="sin ventanas streaming"
+            rows={warehouse.streamMetrics.map((row) => [
+              new Date(row.windowStart).toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit", hour12: false }),
+              row.action,
+              formatNumber(row.totalEvents),
+              formatNumber(row.successCount),
+              `${row.errorRatePct.toFixed(1)}%`,
+              row.avgDurationMs.toFixed(0),
+            ])}
+          />
+        </Panel>
+
         <Panel title="v_mart_api_reliability_daily" icon={Activity}>
           <Table
             headers={["fecha", "fuente", "accion", "calls", "error %", "avg ms"]}

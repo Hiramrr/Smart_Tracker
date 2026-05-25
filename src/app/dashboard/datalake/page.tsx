@@ -101,6 +101,17 @@ interface Stats {
       errors: number;
       errorRatePct: number;
     }>;
+    streamMetrics: Array<{
+      windowStart: string;
+      apiSource: string;
+      action: string;
+      totalEvents: number;
+      successCount: number;
+      errorCount: number;
+      errorRatePct: number;
+      avgDurationMs: number;
+    }>;
+    deadLetters: number;
   };
   progress: {
     recent: unknown[];
@@ -165,6 +176,8 @@ export default function DatalakeDashboard() {
               dimensions: { dates: 0, apiActions: 0, players: 0, cosmetics: 0 },
               facts: { apiCalls: 0, shopAppearances: 0, playerProgress: 0 },
               reliability: [],
+              streamMetrics: [],
+              deadLetters: 0,
             },
             progress: { recent: [] }
           });
@@ -288,6 +301,8 @@ export default function DatalakeDashboard() {
             <WarehouseCount label="Fact API" value={stats?.warehouse.facts.apiCalls} />
             <WarehouseCount label="Fact tienda" value={stats?.warehouse.facts.shopAppearances} />
             <WarehouseCount label="Fact progreso" value={stats?.warehouse.facts.playerProgress} />
+            <WarehouseCount label="Stream ventanas" value={stats?.warehouse.streamMetrics.length} />
+            <WarehouseCount label="DLQ" value={stats?.warehouse.deadLetters} />
             <WarehouseCount label="Cache snapshots" value={stats?.cache.snapshots} />
           </div>
         </div>

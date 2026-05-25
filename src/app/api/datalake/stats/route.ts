@@ -35,6 +35,8 @@ function emptyStats() {
       dimensions: { dates: 0, apiActions: 0, players: 0, cosmetics: 0 },
       facts: { apiCalls: 0, shopAppearances: 0, playerProgress: 0 },
       reliability: [],
+      streamMetrics: [],
+      deadLetters: 0,
     },
     progress: { recent: [] },
   };
@@ -137,7 +139,8 @@ export async function GET() {
          (SELECT COUNT(*) FROM v_dim_cosmetic) AS dim_cosmetics,
          (SELECT COUNT(*) FROM v_fact_api_calls) AS fact_api_calls,
          (SELECT COUNT(*) FROM v_fact_shop_appearances) AS fact_shop_appearances,
-         (SELECT COUNT(*) FROM v_fact_player_progress) AS fact_player_progress`
+         (SELECT COUNT(*) FROM v_fact_player_progress) AS fact_player_progress,
+         (SELECT COUNT(*) FROM stream_dead_letters) AS dead_letters`
     );
 
     const reliabilityResult = await query(
@@ -152,6 +155,20 @@ export async function GET() {
          error_rate_pct
        FROM v_mart_api_reliability_daily
        ORDER BY date_key DESC, total_calls DESC
+       LIMIT 8`
+    );
+
+    const streamMetricsResult = await query(
+      `SELECT
+         window_start,
+         action,
+         api_source,
+         total_events,
+         success_count,
+         error_count,
+         error_rate_pct,
+         avg_duration_ms
+       FROM v_stream_api_metrics_latest
        LIMIT 8`
     );
 
@@ -230,7 +247,18 @@ export async function GET() {
             maxDurationMs: toInt(row.max_duration_ms),
             errors: toInt(row.errors),
             errorRatePct: toFloat(row.error_rate_pct),
-          }))
+          })),
+          streamMetrics: streamMetricsResult.rows.map((row) => ({
+            windowStart: row.window_start,
+            apiSource: row.api_source,
+            action: row.action,
+            totalEvents: toInt(row.total_events),
+            successCount: toInt(row.success_count),
+            errorCount: toInt(row.error_count),
+            errorRatePct: toFloat(row.error_rate_pct),
+            avgDurationMs: toFloat(row.avg_duration_ms),
+          })),
+          deadLetters: toInt(warehouseCountsResult.rows[0].dead_letters),
         },
         progress: {
           recent: await (async () => {
