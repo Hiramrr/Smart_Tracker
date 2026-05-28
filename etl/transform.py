@@ -1,4 +1,5 @@
 import json
+import math
 import os
 import time
 import psycopg2
@@ -17,6 +18,31 @@ DATABASE_URL = os.getenv('DATABASE_URL')
 
 print(f"--- Iniciando Servicio ETL Avanzado (Python) ---")
 print(f"ML Stack: Pandas + Scikit-Learn (KMeans 3-Clusters + Regresión Lineal)")
+
+
+def db_float(value, default=0.0):
+    try:
+        if value is None:
+            return default
+        number = float(value)
+        return number if math.isfinite(number) else default
+    except (TypeError, ValueError):
+        return default
+
+
+def db_int(value, default=0):
+    number = db_float(value, None)
+    return int(number) if number is not None else default
+
+
+def json_default(value):
+    if isinstance(value, np.integer):
+        return int(value)
+    if isinstance(value, np.floating):
+        return db_float(value)
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    return str(value)
 
 # ==========================================
 # Conexión Kafka & DB
@@ -121,17 +147,17 @@ def predict_next_season(historical_data):
     kd_values = df['kd'].values
     kd_coeffs = np.polyfit(x, kd_values, 1)  # pendiente, intercepto
     predicted_kd = kd_coeffs[0] * len(df) + kd_coeffs[1]
-    predicted_kd = max(0, predicted_kd)  # No puede ser negativo
+    predicted_kd = db_float(max(0, predicted_kd))  # No puede ser negativo
     
     # Regresión lineal para Win Rate
     wr_values = df['win_rate'].values
     wr_coeffs = np.polyfit(x, wr_values, 1)
     predicted_wr = wr_coeffs[0] * len(df) + wr_coeffs[1]
-    predicted_wr = max(0, min(100, predicted_wr))  # Entre 0 y 100
+    predicted_wr = db_float(max(0, min(100, predicted_wr)))  # Entre 0 y 100
     
     # Determinar dirección de la tendencia
-    kd_trend = kd_coeffs[0]  # pendiente
-    wr_trend = wr_coeffs[0]
+    kd_trend = db_float(kd_coeffs[0])  # pendiente
+    wr_trend = db_float(wr_coeffs[0])
     
     if kd_trend > 0.01 and wr_trend > 0.01:
         trend = 'up'
@@ -167,9 +193,9 @@ def process_past_seasons(conn, account_id, past_seasons):
         stats = s.get('stats', {})
         season_name = s.get('seasonName', 'Unknown')
         
-        kd = float(stats.get('kd', 0))
-        win_rate = float(stats.get('winRate', 0))
-        matches = int(stats.get('totalMatches', 0))
+        kd = db_float(stats.get('kd', 0))
+        win_rate = db_float(stats.get('winRate', 0))
+        matches = db_int(stats.get('totalMatches', 0))
         
         # Calcular deltas entre temporadas
         delta_kd = (kd - prev_kd) if prev_kd is not None else 0
@@ -186,18 +212,18 @@ def process_past_seasons(conn, account_id, past_seasons):
         cur.execute("""
             INSERT INTO player_progress (account_id, metric_name, metric_value, delta, period_label)
             VALUES (%s, %s, %s, %s, %s)
-        """, (account_id, 'kd_season', kd, round(delta_kd, 4), season_name))
+        """, (account_id, 'kd_season', kd, db_float(round(delta_kd, 4)), season_name))
         
         cur.execute("""
             INSERT INTO player_progress (account_id, metric_name, metric_value, delta, period_label)
             VALUES (%s, %s, %s, %s, %s)
-        """, (account_id, 'win_rate_season', win_rate, round(delta_wr, 4), season_name))
+        """, (account_id, 'win_rate_season', win_rate, db_float(round(delta_wr, 4)), season_name))
         
         # Guardar matches por temporada también
         cur.execute("""
             INSERT INTO player_progress (account_id, metric_name, metric_value, delta, period_label)
             VALUES (%s, %s, %s, %s, %s)
-        """, (account_id, 'matches_season', matches, 0, season_name))
+        """, (account_id, 'matches_season', db_float(matches), 0, season_name))
         
         prev_kd = kd
         prev_wr = win_rate
@@ -212,7 +238,7 @@ def process_past_seasons(conn, account_id, past_seasons):
     cur.execute("""
         INSERT INTO player_progress (account_id, metric_name, metric_value, delta)
         VALUES (%s, %s, %s, %s)
-    """, (account_id, 'skill_category', float(skill_value), 0))
+        """, (account_id, 'skill_category', db_float(skill_value), 0))
     
     # === Predecir próxima temporada ===
     predicted_kd, predicted_wr, trend = predict_next_season(history)
@@ -225,19 +251,19 @@ def process_past_seasons(conn, account_id, past_seasons):
         cur.execute("""
             INSERT INTO player_progress (account_id, metric_name, metric_value, delta)
             VALUES (%s, %s, %s, %s)
-        """, (account_id, 'predicted_kd_next', round(predicted_kd, 4), round(predicted_kd - last_kd, 4)))
+        """, (account_id, 'predicted_kd_next', db_float(round(predicted_kd, 4)), db_float(round(predicted_kd - last_kd, 4))))
         
         cur.execute("""
             INSERT INTO player_progress (account_id, metric_name, metric_value, delta)
             VALUES (%s, %s, %s, %s)
-        """, (account_id, 'predicted_wr_next', round(predicted_wr, 4), round(predicted_wr - last_wr, 4)))
+        """, (account_id, 'predicted_wr_next', db_float(round(predicted_wr, 4)), db_float(round(predicted_wr - last_wr, 4))))
         
         # Guardar dirección de tendencia como valor numérico
         trend_val = {'down': -2, 'slightly_down': -1, 'stable': 0, 'slightly_up': 1, 'up': 2}
         cur.execute("""
             INSERT INTO player_progress (account_id, metric_name, metric_value, delta)
             VALUES (%s, %s, %s, %s)
-        """, (account_id, 'trend_direction', float(trend_val.get(trend, 0)), 0))
+        """, (account_id, 'trend_direction', db_float(trend_val.get(trend, 0)), 0))
     
     print(f"[ETL-ML] Procesadas {len(history)} temporadas pasadas para {account_id}.")
     print(f"  -> Nivel KMeans: {skill_level} (valor={skill_value})")
@@ -278,12 +304,13 @@ def process_current_season(conn, account_id, stats_data):
             
             row = cur.fetchone()
             last_value = float(row[0]) if row else None
-            delta = (float(value) - last_value) if last_value is not None else 0
+            current_value = db_float(value)
+            delta = (current_value - last_value) if last_value is not None else 0
             
             cur.execute("""
                 INSERT INTO player_progress (account_id, metric_name, metric_value, delta)
                 VALUES (%s, %s, %s, %s)
-            """, (account_id, name, value, round(delta, 4)))
+            """, (account_id, name, current_value, db_float(round(delta, 4))))
         except Exception as e:
             print(f"Error metric {name}: {e}")
     
@@ -293,12 +320,7 @@ def process_current_season(conn, account_id, stats_data):
 
 
 def _num(value, default=None):
-    try:
-        if value is None:
-            return default
-        return float(value)
-    except (TypeError, ValueError):
-        return default
+    return db_float(value, default)
 
 
 def _int_or_none(value):
@@ -395,7 +417,7 @@ def process_tournament_placements(conn, account_id, event, data):
             assists,
             avg_placement,
             total_matches,
-            json.dumps(placement.get('raw', placement))
+            json.dumps(placement.get('raw', placement), default=json_default)
         ))
 
         if rank is not None:
@@ -411,7 +433,7 @@ def process_tournament_placements(conn, account_id, event, data):
 
     if numeric_placements:
         best = min(numeric_placements)
-        avg_rank = float(np.mean(numeric_placements))
+        avg_rank = db_float(np.mean(numeric_placements))
         top_10 = sum(1 for rank in numeric_placements if rank <= 10)
         top_25 = sum(1 for rank in numeric_placements if rank <= 25)
         top_100 = sum(1 for rank in numeric_placements if rank <= 100)
@@ -420,7 +442,7 @@ def process_tournament_placements(conn, account_id, event, data):
         events_count = len(numeric_placements)
         # Higher is better: rewards top finishes, consistency and volume.
         # Tournament history is a better pro signal than public lifetime KD/WR.
-        placement_power = np.mean([100 / np.log10(max(rank, 2)) for rank in numeric_placements])
+        placement_power = db_float(np.mean([100 / np.log10(max(rank, 2)) for rank in numeric_placements]))
         consistency_bonus = (
             top_10 * 24 +
             top_25 * 14 +
@@ -428,32 +450,32 @@ def process_tournament_placements(conn, account_id, event, data):
             top_500 * 2.5 +
             min(events_count, 60) * 0.55
         )
-        placement_score = min(100, placement_power + consistency_bonus)
+        placement_score = db_float(min(100, placement_power + consistency_bonus))
         skill_value = classify_competitive_profile(placement_score, best, top_25, top_100, top_500)
 
         aggregate_metrics = [
             ('tournament_events_count', events_count),
             ('tournament_best_placement', best),
-            ('tournament_avg_placement', round(avg_rank, 4)),
+            ('tournament_avg_placement', db_float(round(avg_rank, 4))),
             ('tournament_top_10_count', top_10),
             ('tournament_top_25_count', top_25),
             ('tournament_top_100_count', top_100),
             ('tournament_top_500_count', top_500),
             ('tournament_top_1000_count', top_1000),
-            ('tournament_profile_score', round(float(placement_score), 4)),
-            ('competitive_power_score', round(float(placement_score), 4)),
+            ('tournament_profile_score', db_float(round(placement_score, 4))),
+            ('competitive_power_score', db_float(round(placement_score, 4))),
             ('skill_category', skill_value),
         ]
         if points_values:
-            aggregate_metrics.append(('tournament_avg_points', round(float(np.mean(points_values)), 4)))
+            aggregate_metrics.append(('tournament_avg_points', db_float(round(db_float(np.mean(points_values)), 4))))
         if elimination_values:
-            aggregate_metrics.append(('tournament_avg_eliminations', round(float(np.mean(elimination_values)), 4)))
+            aggregate_metrics.append(('tournament_avg_eliminations', db_float(round(db_float(np.mean(elimination_values)), 4))))
 
         for metric_name, metric_value in aggregate_metrics:
             cur.execute("""
                 INSERT INTO player_progress (account_id, metric_name, metric_value, delta)
                 VALUES (%s, %s, %s, %s)
-            """, (account_id, metric_name, metric_value, 0))
+            """, (account_id, metric_name, db_float(metric_value), 0))
 
     conn.commit()
     cur.close()
@@ -603,10 +625,10 @@ def analyze_fortnite_trends(features_df):
 def save_fortnite_replay_metrics(conn, player_id, display_name, features_df, playstyle_label, playstyle_value, trends):
     cur = conn.cursor()
     total_matches = len(features_df)
-    avg_kd = round(features_df['kd'].mean(), 4) if not features_df['kd'].isna().all() else 0
-    avg_placement = round(features_df['placement'].mean(), 4) if not features_df['placement'].isna().all() else 0
-    avg_damage = round(features_df['damage_to_players'].mean(), 4) if not features_df['damage_to_players'].isna().all() else 0
-    avg_accuracy = round(features_df['accuracy_percent'].mean(), 4) if not features_df['accuracy_percent'].isna().all() else 0
+    avg_kd = db_float(round(db_float(features_df['kd'].mean()), 4)) if not features_df['kd'].isna().all() else 0
+    avg_placement = db_float(round(db_float(features_df['placement'].mean()), 4)) if not features_df['placement'].isna().all() else 0
+    avg_damage = db_float(round(db_float(features_df['damage_to_players'].mean()), 4)) if not features_df['damage_to_players'].isna().all() else 0
+    avg_accuracy = db_float(round(db_float(features_df['accuracy_percent'].mean()), 4)) if not features_df['accuracy_percent'].isna().all() else 0
     wins = int((features_df['placement'] == 1).sum()) if not features_df['placement'].isna().all() else 0
 
     metrics = [
@@ -643,7 +665,7 @@ def save_fortnite_replay_metrics(conn, player_id, display_name, features_df, pla
         INSERT INTO player_analysis_snapshots (
             account_id, kd, win_rate, matches, kills, score_per_match
         ) VALUES (%s, %s, %s, %s, %s, %s)
-    """, (player_id, avg_kd, win_rate, total_matches, kills, avg_damage))
+    """, (player_id, db_float(avg_kd), db_float(win_rate), db_int(total_matches), db_int(kills), db_float(avg_damage)))
 
     conn.commit()
     cur.close()
@@ -706,12 +728,46 @@ def transform_and_save(conn, event):
     if 'stats' in data:
         process_current_season(conn, account_id, data)
 
+
+def persist_dead_letter(conn, message, error):
+    try:
+        conn.rollback()
+        key = message.key.decode('utf-8') if isinstance(message.key, bytes) else message.key
+        raw_value = json.dumps(message.value, default=json_default)
+        if len(raw_value) > 20000:
+            raw_value = raw_value[:20000] + '... [truncated]'
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO stream_dead_letters (
+                topic, partition_id, offset_value, message_key, raw_value, error_message
+            ) VALUES (%s, %s, %s, %s, %s, %s)
+        """, (
+            message.topic,
+            message.partition,
+            str(message.offset),
+            key,
+            raw_value,
+            str(error)
+        ))
+        conn.commit()
+        cur.close()
+    except Exception as dlq_error:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        print(f"Error guardando DLQ ETL: {dlq_error}")
+
 def main():
     consumer = get_kafka_consumer()
     conn = get_db_connection()
     try:
         for message in consumer:
-            transform_and_save(conn, message.value)
+            try:
+                transform_and_save(conn, message.value)
+            except Exception as e:
+                print(f"Error procesando evento ETL: {e}")
+                persist_dead_letter(conn, message, e)
     except Exception as e:
         print(f"Error Loop: {e}")
     finally:

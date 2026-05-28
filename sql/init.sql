@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS api_calls (
     
     -- Índices para análisis
     CONSTRAINT valid_action CHECK (action IN (
+        'unknown',
         'lookup', 'stats', 'tracker-stats', 'fortnite-api-stats',
         'ranked-current', 'tournaments', 'leaderboard', 'shop',
         'cosmetic-search', 'cosmetic-ingest', 'cosmetic-features',
@@ -669,7 +670,11 @@ BEGIN
             'durationMs', NEW.duration_ms,
             'apiSource', NEW.api_source,
             'endpointUrl', NEW.endpoint_url,
-            'responseBody', NEW.response_body,
+            'responseBody', CASE
+                WHEN COALESCE(NEW.response_size, 0) <= 900000 THEN NEW.response_body
+                ELSE NULL
+            END,
+            'responseBodyTruncated', COALESCE(NEW.response_size, 0) > 900000,
             'timestamp', NEW.created_at
         )
     );

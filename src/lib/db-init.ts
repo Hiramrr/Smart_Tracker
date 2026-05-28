@@ -40,6 +40,7 @@ export async function initializeDatabase(): Promise<void> {
           response_body JSONB,
           created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
           CONSTRAINT valid_action CHECK (action IN (
+            'unknown',
             'lookup', 'stats', 'tracker-stats', 'fortnite-api-stats',
             'ranked-current', 'tournaments', 'leaderboard', 'shop',
             'cosmetic-search', 'cosmetic-ingest', 'cosmetic-features',
@@ -64,6 +65,7 @@ export async function initializeDatabase(): Promise<void> {
       await client.query(`ALTER TABLE api_calls DROP CONSTRAINT IF EXISTS valid_action`);
       await client.query(`
         ALTER TABLE api_calls ADD CONSTRAINT valid_action CHECK (action IN (
+          'unknown',
           'lookup', 'stats', 'tracker-stats', 'fortnite-api-stats',
           'ranked-current', 'tournaments', 'leaderboard', 'shop',
           'cosmetic-search', 'cosmetic-ingest', 'cosmetic-features',
@@ -80,8 +82,17 @@ export async function initializeDatabase(): Promise<void> {
           'lol-mastery-cached', 'lol-matches-cached', 'lol-match-cached',
           'lol-overview-cached', 'lol-static-champions-cached',
           'fortnite-replay-parse-cached'
-        ))
+        )) NOT VALID
       `);
+      await client.query(`SAVEPOINT validate_valid_action`);
+      try {
+        await client.query(`ALTER TABLE api_calls VALIDATE CONSTRAINT valid_action`);
+        await client.query(`RELEASE SAVEPOINT validate_valid_action`);
+      } catch (error) {
+        await client.query(`ROLLBACK TO SAVEPOINT validate_valid_action`);
+        await client.query(`RELEASE SAVEPOINT validate_valid_action`);
+        console.warn("[DB-Init] valid_action quedo sin validar por filas historicas fuera de catalogo:", error);
+      }
 
       await client.query(`CREATE INDEX IF NOT EXISTS idx_api_calls_action ON api_calls(action)`);
       await client.query(`CREATE INDEX IF NOT EXISTS idx_api_calls_created_at ON api_calls(created_at)`);
@@ -329,7 +340,7 @@ export async function initializeDatabase(): Promise<void> {
           stats_source VARCHAR(50),
           playlist VARCHAR(255),
           started_at TIMESTAMP WITH TIME ZONE,
-          duration_seconds INTEGER,
+          duration_seconds NUMERIC,
           total_players INTEGER,
           placement INTEGER,
           eliminations INTEGER,
@@ -342,7 +353,7 @@ export async function initializeDatabase(): Promise<void> {
           revives INTEGER,
           materials_gathered INTEGER,
           materials_used INTEGER,
-          total_traveled INTEGER,
+          total_traveled NUMERIC,
           event_eliminations INTEGER,
           kill_feed_events INTEGER,
           associated_source VARCHAR(20) DEFAULT 'manual',
@@ -351,6 +362,8 @@ export async function initializeDatabase(): Promise<void> {
           CONSTRAINT unique_replay_player UNIQUE (replay_id, player_id)
         )
       `);
+      await client.query(`ALTER TABLE fortnite_replays ALTER COLUMN duration_seconds TYPE NUMERIC USING duration_seconds::numeric`);
+      await client.query(`ALTER TABLE fortnite_replays ALTER COLUMN total_traveled TYPE NUMERIC USING total_traveled::numeric`);
       await client.query(`CREATE INDEX IF NOT EXISTS idx_fortnite_replays_player ON fortnite_replays(player_id)`);
       await client.query(`CREATE INDEX IF NOT EXISTS idx_fortnite_replays_display_name ON fortnite_replays(display_name)`);
       await client.query(`CREATE INDEX IF NOT EXISTS idx_fortnite_replays_created ON fortnite_replays(created_at)`);
@@ -725,16 +738,16 @@ export async function initializeDatabase(): Promise<void> {
       // Tabla: api_outbox
       await client.query(`
         CREATE TABLE IF NOT EXISTS api_outbox (
-            id SERIAL PRIMARY KEY,
-            topic VARCHAR(255) NOT NULL,
-            event_key VARCHAR(255),
+            id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+            topic VARCHAR(100) NOT NULL,
+            event_key VARCHAR(100),
             payload JSONB NOT NULL,
             published BOOLEAN DEFAULT FALSE,
             created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
             published_at TIMESTAMP WITH TIME ZONE
         )
       `);
-      await client.query(`CREATE INDEX IF NOT EXISTS idx_api_outbox_published ON api_outbox(published)`);
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_api_outbox_published ON api_outbox(published) WHERE published = FALSE`);
 
       // Función de Trigger Outbox
       await client.query(`
@@ -744,16 +757,24 @@ export async function initializeDatabase(): Promise<void> {
             INSERT INTO api_outbox (topic, event_key, payload)
             VALUES (
                 'api-calls',
-                NEW.id::text,
+                NEW.action,
                 jsonb_build_object(
                     'id', NEW.id,
                     'action', NEW.action,
                     'parameters', NEW.parameters,
-                    'apiSource', NEW.api_source,
+                    'sourceIp', NEW.source_ip,
+                    'userAgent', NEW.user_agent,
                     'responseStatus', NEW.response_status,
-                    'responseBody', NEW.response_body,
+                    'responseSize', NEW.response_size,
                     'durationMs', NEW.duration_ms,
-                    'createdAt', NEW.created_at
+                    'apiSource', NEW.api_source,
+                    'endpointUrl', NEW.endpoint_url,
+                    'responseBody', CASE
+                        WHEN COALESCE(NEW.response_size, 0) <= 900000 THEN NEW.response_body
+                        ELSE NULL
+                    END,
+                    'responseBodyTruncated', COALESCE(NEW.response_size, 0) > 900000,
+                    'timestamp', NEW.created_at
                 )
             );
             RETURN NEW;

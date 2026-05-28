@@ -85,38 +85,53 @@ function field<T extends string | number | null | undefined>(
   return (match[camelKey] ?? match[pascalKey] ?? null) as T | null;
 }
 
+function numberField(match: ParserReplayMatch, camelKey: string, pascalKey: string) {
+  const value = field<string | number>(match, camelKey, pascalKey);
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+
+  const number = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function integerField(match: ParserReplayMatch, camelKey: string, pascalKey: string) {
+  const number = numberField(match, camelKey, pascalKey);
+  return number === null ? null : Math.round(number);
+}
+
 function normalizeMatch(match: ParserReplayMatch): ReplayMatch {
   return {
     replayId: field<string>(match, "replayId", "ReplayId") ?? randomUUID(),
     fileName: field<string>(match, "fileName", "FileName") ?? "replay.replay",
     startedAt: field<string>(match, "startedAt", "StartedAt"),
     duration: field<string>(match, "duration", "Duration"),
-    durationSeconds: field<number>(match, "durationSeconds", "DurationSeconds"),
+    durationSeconds: numberField(match, "durationSeconds", "DurationSeconds"),
     playlist: field<string>(match, "playlist", "Playlist"),
     localPlayerId: field<string>(match, "localPlayerId", "LocalPlayerId"),
     playerName: field<string>(match, "playerName", "PlayerName"),
     statsSource: field<string>(match, "statsSource", "StatsSource"),
-    totalPlayers: field<number>(match, "totalPlayers", "TotalPlayers"),
+    totalPlayers: integerField(match, "totalPlayers", "TotalPlayers"),
     placement:
-      field<number>(match, "placement", "Placement") ??
-      field<number>(match, "playerDataPlacement", "PlayerDataPlacement") ??
-      field<number>(match, "teamDataPlacement", "TeamDataPlacement"),
-    displayEliminations: field<number>(match, "displayEliminations", "DisplayEliminations"),
-    displayTeamEliminations: field<number>(match, "displayTeamEliminations", "DisplayTeamEliminations"),
-    displayDeaths: field<number>(match, "displayDeaths", "DisplayDeaths"),
-    damageToPlayers: field<number>(match, "damageToPlayers", "DamageToPlayers"),
-    damageFromPlayers: field<number>(match, "damageFromPlayers", "DamageFromPlayers"),
-    playerDamageRatio: field<number>(match, "playerDamageRatio", "PlayerDamageRatio"),
-    accuracyPercent: field<number>(match, "accuracyPercent", "AccuracyPercent"),
-    assists: field<number>(match, "assists", "Assists"),
-    revives: field<number>(match, "revives", "Revives"),
-    materialsGathered: field<number>(match, "materialsGathered", "MaterialsGathered"),
-    materialsUsed: field<number>(match, "materialsUsed", "MaterialsUsed"),
-    totalTraveled: field<number>(match, "totalTraveled", "TotalTraveled"),
-    eventEliminations: field<number>(match, "eventEliminations", "EventEliminations"),
-    killFeedEvents: field<number>(match, "killFeedEvents", "KillFeedEvents"),
-    playerRows: field<number>(match, "playerRows", "PlayerRows"),
-    teamRows: field<number>(match, "teamRows", "TeamRows"),
+      integerField(match, "placement", "Placement") ??
+      integerField(match, "playerDataPlacement", "PlayerDataPlacement") ??
+      integerField(match, "teamDataPlacement", "TeamDataPlacement"),
+    displayEliminations: integerField(match, "displayEliminations", "DisplayEliminations"),
+    displayTeamEliminations: integerField(match, "displayTeamEliminations", "DisplayTeamEliminations"),
+    displayDeaths: integerField(match, "displayDeaths", "DisplayDeaths"),
+    damageToPlayers: integerField(match, "damageToPlayers", "DamageToPlayers"),
+    damageFromPlayers: integerField(match, "damageFromPlayers", "DamageFromPlayers"),
+    playerDamageRatio: numberField(match, "playerDamageRatio", "PlayerDamageRatio"),
+    accuracyPercent: numberField(match, "accuracyPercent", "AccuracyPercent"),
+    assists: integerField(match, "assists", "Assists"),
+    revives: integerField(match, "revives", "Revives"),
+    materialsGathered: integerField(match, "materialsGathered", "MaterialsGathered"),
+    materialsUsed: integerField(match, "materialsUsed", "MaterialsUsed"),
+    totalTraveled: numberField(match, "totalTraveled", "TotalTraveled"),
+    eventEliminations: integerField(match, "eventEliminations", "EventEliminations"),
+    killFeedEvents: integerField(match, "killFeedEvents", "KillFeedEvents"),
+    playerRows: integerField(match, "playerRows", "PlayerRows"),
+    teamRows: integerField(match, "teamRows", "TeamRows"),
   };
 }
 
